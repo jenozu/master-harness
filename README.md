@@ -36,6 +36,13 @@ repo is private, your machine's git login is used for the clone. If git asks, si
 
 From your phone: `/rc` in the running session, then scan the QR code with the Claude app.
 
+## Let projects deploy to your VPS on their own
+
+One-time setup on your PC: see [`library/vps-kit/README.md`](library/vps-kit/README.md). After that, every
+project can create its app on the VPS, deploy with `git push vps main`, and check logs without asking you. A
+restricted key and the `vps-agent` gatekeeper on the server limit what agents can do; restores and deletions
+stay with you.
+
 ## Upgrade an existing project
 
 ```
@@ -50,6 +57,7 @@ It covers projects built with an older harness and hand-made setups from before 
 | `BOOTSTRAP.md` / `UPGRADE.md` | The prompts Claude follows |
 | `template/` | Copied into every project (`.tmpl` files get placeholders filled) |
 | `library/` | Optional stack rules, skills and permission sets, picked per project |
+| `library/vps-kit/` | One-time VPS setup (`setup_vps.sh`) and the server-side `vps-agent` gatekeeper |
 | `scripts/apply_template.py` | Copies and fills the template and merges settings. Never overwrites; `--upgrade` backs up |
 | `template/.claude/scripts/check_harness.py` | Checks a project's setup (also lives in each project) |
 | `docs/` | Architecture, task schema, placeholders, customizing |

@@ -1,0 +1,633 @@
+#!/usr/bin/env bash
+# vps-agent: the gatekeeper for Claude's deploy key on this VPS (master-harness VPS kit).
+#
+# The "deploy" user's SSH key is restricted to `vps-agent --ssh` (authorized_keys forced command), so agents can
+# only run the subcommands allowed below, plus `git push` into /srv/git/<app>.git. Admin-only subcommands
+# (restore, destroy) work only when a human runs them with sudo from their own login.
+#
+#   ssh vps help                         (from a project, through the ~/.ssh/config alias "vps")
+#   sudo vps-agent restore <app> <file>  (human, on the server)
+#
+# Layout: /srv/apps/<app>/{releases/,current -> releases/X,shared/.env,shared/start.sh,app.conf}
+#         /srv/git/<app>.git (bare, push target)   /var/backups/apps/<app>/   /etc/vps-agent/config
+set -euo pipefail
+
+VERSION="1.1.0"
+APPS=/srv/apps
+GITS=/srv/git
+BACKUPS=/var/backups/apps
+CONF=/etc/vps-agent/config
+NGINX_SNIPPETS=/etc/nginx/vps-apps
+SELF=/usr/local/sbin/vps-agent
+DEPLOY_USER=deploy
+PORT_BASE=8100
+KEEP_RELEASES=3
+KEEP_BACKUPS=14
+NAME_RE='^[a-z][a-z0-9-]{1,30}$'
+DOMAIN_RE='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$'
+KEY_RE='^[A-Z][A-Z0-9_]{0,63}$'
+TOKEN_RE='^[A-Za-z0-9._=:/@,+%-]+$'
+EXTENSIONS="pg_trgm unaccent citext uuid-ossp pgcrypto hstore vector"
+RESERVED_KEYS="PORT APP_NAME DATABASE_URL SECRET_KEY"
+SSH_ALLOWED="help version list create deploy status logs env-keys env-set backup backups tls rollback"
+TEST="${VPS_AGENT_TEST:-}"
+
+say() { echo "vps-agent: $*"; }
+die() { echo "vps-agent: ERROR: $*" >&2; exit 1; }
+valid_name() { [[ "$1" =~ $NAME_RE ]] || die "bad app name '$1' (lowercase letters, digits, dashes; 2-31 chars; starts with a letter)"; }
+app_dir() { echo "$APPS/$1"; }
+need_app() { valid_name "$1"; [[ -f "$(app_dir "$1")/app.conf" ]] || die "no app '$1' (create it first: vps-agent create $1)"; }
+conf_get() { sed -n "s/^$2=//p" "$(app_dir "$1")/app.conf" | tail -1; }
+conf_set() {
+  local f; f="$(app_dir "$1")/app.conf"
+  grep -v "^$2=" "$f" > "$f.tmp" || true
+  echo "$2=$3" >> "$f.tmp"
+  mv "$f.tmp" "$f"
+}
+global() { [[ -f "$CONF" ]] && sed -n "s/^$1=//p" "$CONF" | tail -1 || true; }
+
+usage() {
+  cat <<EOF
+vps-agent $VERSION - deploy gatekeeper (agents: ssh vps <command>)
+  list                                   apps, domains, ports, status
+  create <app> [--domain D] [--db] [--ext pg_trgm,unaccent] [--port N]
+                                         new app: user, dirs, .env, git repo, nginx, TLS, database
+  deploy <app> [sha]                     build + migrate + switch + health check (auto rollback on failure)
+                                         normally triggered by: git push vps main
+  status <app>                           service, health, deployed commit, TLS
+  logs <app> [-n N] [--deploy]           last N service log lines (max 200), or the last deploy log
+  env-keys <app>                         names of the variables in the app's .env (values hidden)
+  env-set <app> KEY=VALUE [...]          set variables (not PORT/APP_NAME/DATABASE_URL/SECRET_KEY), restart
+  backup <app>|--all                     database dump now (kept $KEEP_BACKUPS days)
+  backups <app>                          list dumps
+  tls <app>                              get/renew the HTTPS certificate (needs DNS pointing here)
+  rollback <app>                         switch back to the previous release
+  version | help
+Admin only (sudo from your own login, never through the deploy key):
+  restore <app> <dump-file>              restore a dump (takes a fresh backup first)
+  destroy <app> --yes [--drop-db]        remove an app (backups are kept)
+Project config: deploy/vps.json in the app's repo (see the vps skill).
+EOF
+}
+
+# ---------------------------------------------------------------- SSH forced-command filter (runs as deploy)
+
+ssh_mode() {
+  local cmd="${SSH_ORIGINAL_COMMAND:-}"
+  if [[ -z "$cmd" ]]; then usage; exit 0; fi
+  if [[ "$cmd" =~ ^git-receive-pack\ \'?(/srv/git/)?([a-z][a-z0-9-]{1,30})\.git/?\'?$ ]]; then
+    local name="${BASH_REMATCH[2]}"
+    [[ -d "$GITS/$name.git" ]] || die "no git repo for '$name' (run: ssh vps create $name)"
+    if [[ -n "$TEST" ]]; then echo "EXEC git-receive-pack $GITS/$name.git"; exit 0; fi
+    exec git-receive-pack "$GITS/$name.git"
+  fi
+  [[ "$cmd" != *$'\n'* ]] || die "multi-line commands are not allowed"
+  local -a args
+  read -r -a args <<< "$cmd"
+  [[ ${#args[@]} -gt 0 ]] || { usage; exit 0; }
+  local a
+  for a in "${args[@]}"; do
+    [[ "$a" =~ $TOKEN_RE ]] || die "argument '$a' has characters that aren't allowed over ssh"
+  done
+  case " $SSH_ALLOWED " in
+    *" ${args[0]} "*) ;;
+    *) die "'${args[0]}' is not allowed through the deploy key. Allowed: $SSH_ALLOWED" ;;
+  esac
+  if [[ -n "$TEST" ]]; then echo "EXEC sudo -n $SELF ${args[*]}"; exit 0; fi
+  exec sudo -n "$SELF" "${args[@]}"
+}
+
+# ---------------------------------------------------------------- helpers (root)
+
+as_app() {  # run a command string as the app user, in a dir, with the app's env loaded
+  local name="$1" dir="$2" cmd="$3"
+  local user="app-$name" envf; envf="$(app_dir "$name")/shared/.env"
+  timeout 1800 runuser -u "$user" -- env -i HOME="$(app_dir "$name")" PATH=/usr/local/bin:/usr/bin:/bin \
+    bash -c 'set -a; . "$1"; set +a; cd "$2" && eval "$3"' _ "$envf" "$dir" "$cmd"
+}
+
+next_port() {
+  local p=$PORT_BASE used
+  used="$(cat "$APPS"/*/app.conf 2>/dev/null | sed -n 's/^PORT=//p' | sort -n)"
+  while grep -qx "$p" <<< "$used" || ss -ltn 2>/dev/null | grep -q ":$p "; do p=$((p + 1)); done
+  echo "$p"
+}
+
+dns_matches() {
+  local domain="$1" me them
+  me="$(curl -fsS -4 --max-time 5 https://ifconfig.me 2>/dev/null || true)"
+  them="$(getent ahostsv4 "$domain" | awk 'NR==1{print $1}')"
+  [[ -n "$me" && "$me" == "$them" ]]
+}
+
+json() {  # json <file> <jq filter>  -> raw value or empty
+  jq -er "$2 // empty" "$1" 2>/dev/null || true
+}
+
+one_line() { [[ "$1" != *$'\n'* ]] || die "$2 must be a single line"; }
+
+render_site() {  # the server block; certbot later adds TLS lines to this file, so it's written once
+  local name="$1" domain="$2"
+  cat <<EOF
+# Managed by vps-agent ($name). Locations live in $NGINX_SNIPPETS/$name.conf (rewritten on deploy).
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $domain;
+    client_max_body_size 20m;
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml application/manifest+json;
+    include $NGINX_SNIPPETS/$name.conf;
+}
+EOF
+}
+
+render_locations() {  # render_locations <name> <port> <vps.json|""> <release-dir>
+  local name="$1" port="$2" cfg="$3" current; current="$(app_dir "$name")/current"
+  local web_dir web_out api_dir api_path strip
+  if [[ -z "$cfg" ]]; then
+    echo "location / { default_type text/html; return 200 '<h1>$name is being set up</h1>'; }"
+    return
+  fi
+  web_dir="$(json "$cfg" '.web.dir')"
+  web_out="$(json "$cfg" '.web.out')"
+  api_dir="$(json "$cfg" '.api.dir')"
+  api_path="$(json "$cfg" '.api.path')"
+  strip="$(jq -r 'if .api.strip_prefix == false then "no" else "yes" end' "$cfg")"
+  if [[ -n "$api_dir" || "$(json "$cfg" '.api.start')" != "" ]]; then
+    [[ -n "$api_path" ]] || { [[ -n "$web_dir$web_out" ]] && api_path="/api/" || api_path="/"; }
+    [[ "$api_path" =~ ^/([a-z0-9_-]+/)*$ ]] || die "api.path '$api_path' must look like /api/ or /"
+    local target="http://127.0.0.1:$port"
+    [[ "$strip" == "yes" && "$api_path" != "/" ]] && target="$target/"
+    cat <<EOF
+location $api_path {
+    proxy_pass $target;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 120s;
+}
+EOF
+    [[ "$api_path" == "/" ]] && return
+  fi
+  if [[ -n "$web_out" ]]; then
+    local root="$current/${web_dir:+$web_dir/}$web_out"
+    root="${root%/}"
+    [[ "$root" =~ ^[A-Za-z0-9/._-]+$ ]] || die "web.dir/web.out contain characters that aren't allowed"
+    cat <<EOF
+root $root;
+index index.html;
+location = /index.html { add_header Cache-Control "no-cache"; }
+location = /sw.js { add_header Cache-Control "no-cache"; try_files \$uri =404; }
+location = /manifest.webmanifest { add_header Cache-Control "no-cache"; try_files \$uri =404; }
+location /assets/ { add_header Cache-Control "public, max-age=31536000, immutable"; try_files \$uri =404; }
+location / { try_files \$uri \$uri/ /index.html; }
+EOF
+  fi
+}
+
+reload_nginx() {
+  if nginx -t >/dev/null 2>&1; then systemctl reload nginx; else nginx -t; return 1; fi
+}
+
+write_unit() {
+  local name="$1"
+  cat > "/etc/systemd/system/app-$name.service" <<EOF
+[Unit]
+Description=$name (vps-agent)
+After=network.target postgresql.service
+
+[Service]
+User=app-$name
+Group=app-$name
+ExecStart=$(app_dir "$name")/shared/start.sh
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable "app-$name" >/dev/null 2>&1
+}
+
+health_check() {  # health_check <name> <port> <path|""> <has_api>
+  local name="$1" port="$2" path="$3" has_api="$4" domain
+  domain="$(conf_get "$name" DOMAIN)"
+  for _ in $(seq 1 30); do
+    if [[ "$has_api" == yes ]]; then
+      curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:$port${path:-/}" && return 0
+    else
+      curl -fsS -o /dev/null --max-time 3 -H "Host: $domain" http://127.0.0.1/ && return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------- subcommands
+
+cmd_list() {
+  local f name
+  printf '%-20s %-35s %-6s %-9s %s\n' APP DOMAIN PORT SERVICE DEPLOYED
+  for f in "$APPS"/*/app.conf; do
+    [[ -f "$f" ]] || continue
+    name="$(basename "$(dirname "$f")")"
+    printf '%-20s %-35s %-6s %-9s %s\n' "$name" "$(conf_get "$name" DOMAIN)" "$(conf_get "$name" PORT)" \
+      "$(systemctl is-active "app-$name" 2>/dev/null || echo -)" "$(conf_get "$name" DEPLOYED)"
+  done
+}
+
+cmd_create() {
+  local name="${1:-}"; shift || true
+  valid_name "$name"
+  local domain="" db="no" exts="" port=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --domain) domain="${2:-}"; shift 2 ;;
+      --db) db="yes"; shift ;;
+      --ext) exts="${2:-}"; db="yes"; shift 2 ;;
+      --port) port="${2:-}"; shift 2 ;;
+      *) die "unknown option '$1'" ;;
+    esac
+  done
+  local dir; dir="$(app_dir "$name")"
+  if [[ -f "$dir/app.conf" ]]; then
+    say "app '$name' already exists ($(conf_get "$name" DOMAIN), port $(conf_get "$name" PORT)). Nothing to do."
+    say "push with: git remote add vps vps:$GITS/$name.git && git push vps main"
+    return 0
+  fi
+  if [[ -z "$domain" ]]; then
+    local apps_domain; apps_domain="$(global APPS_DOMAIN)"
+    [[ -n "$apps_domain" ]] || die "no --domain given and no APPS_DOMAIN in $CONF"
+    domain="$name.$apps_domain"
+  fi
+  [[ "$domain" =~ $DOMAIN_RE ]] || die "bad domain '$domain'"
+  grep -rqx "DOMAIN=$domain" "$APPS"/*/app.conf 2>/dev/null && die "domain $domain is already used by another app"
+  [[ -z "$port" ]] && port="$(next_port)"
+  [[ "$port" =~ ^[0-9]{4,5}$ && "$port" -ge 1024 && "$port" -le 65000 ]] || die "bad port '$port'"
+  local e
+  for e in ${exts//,/ }; do
+    [[ " $EXTENSIONS " == *" $e "* ]] || die "extension '$e' not in the allowed list: $EXTENSIONS"
+  done
+
+  say "creating $name ($domain, port $port, database: $db)"
+  id "app-$name" >/dev/null 2>&1 || useradd --system --home-dir "$dir" --shell /usr/sbin/nologin "app-$name"
+  mkdir -p "$dir/releases" "$dir/shared"
+  local envf="$dir/shared/.env"
+  {
+    echo "# Managed by vps-agent. Agents can list names (env-keys) and set values (env-set), never read them."
+    echo "APP_NAME=$name"
+    echo "PORT=$port"
+    echo "DOMAIN=$domain"
+    echo "ALLOWED_ORIGINS=https://$domain"
+    echo "SECRET_KEY=$(openssl rand -hex 32)"
+  } > "$envf"
+  if [[ "$db" == yes ]]; then
+    local dbname="${name//-/_}" pass; pass="$(openssl rand -hex 24)"
+    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$dbname'" | grep -q 1; then
+      sudo -u postgres psql -qc "ALTER ROLE \"$dbname\" WITH LOGIN PASSWORD '$pass'"
+    else
+      sudo -u postgres psql -qc "CREATE ROLE \"$dbname\" WITH LOGIN PASSWORD '$pass'"
+    fi
+    sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$dbname'" | grep -q 1 \
+      || sudo -u postgres createdb -O "$dbname" "$dbname"
+    for e in ${exts//,/ }; do sudo -u postgres psql -q -d "$dbname" -c "CREATE EXTENSION IF NOT EXISTS \"$e\";"; done
+    echo "DATABASE_URL=postgresql://$dbname:$pass@localhost:5432/$dbname" >> "$envf"
+  fi
+  chown -R "app-$name:app-$name" "$dir"
+  chmod 750 "$dir"
+  chmod 600 "$envf"
+  {
+    echo "NAME=$name"; echo "DOMAIN=$domain"; echo "PORT=$port"; echo "DB=$db"; echo "CREATED=$(date -Is)"
+  } > "$dir/app.conf"
+  chown root:root "$dir/app.conf"
+
+  local repo="$GITS/$name.git"
+  if [[ ! -d "$repo" ]]; then
+    git init -q --bare "$repo"
+    cat > "$repo/hooks/post-receive" <<EOF
+#!/bin/sh
+# vps-agent: pushing main (or master) deploys.
+while read -r old new ref; do
+  case "\$ref" in
+    refs/heads/main|refs/heads/master) sudo -n $SELF deploy $name "\$new" ;;
+    *) echo "pushed \$ref (only main/master deploys)" ;;
+  esac
+done
+EOF
+    chmod 755 "$repo/hooks/post-receive"
+    chown -R "$DEPLOY_USER:$DEPLOY_USER" "$repo"
+  fi
+
+  mkdir -p "$NGINX_SNIPPETS"
+  render_locations "$name" "$port" "" "" > "$NGINX_SNIPPETS/$name.conf"
+  render_site "$name" "$domain" > "/etc/nginx/sites-available/app-$name"
+  ln -sf "/etc/nginx/sites-available/app-$name" "/etc/nginx/sites-enabled/app-$name"
+  reload_nginx || die "nginx config test failed; app created but not served yet"
+  cmd_tls "$name" || true
+  say "done. In the project:"
+  echo "  git remote add vps vps:$repo"
+  echo "  git push vps main      # deploys (needs deploy/vps.json in the repo)"
+}
+
+cmd_tls() {
+  local name="$1" domain email
+  need_app "$name"
+  domain="$(conf_get "$name" DOMAIN)"
+  email="$(global EMAIL)"
+  if [[ -d "/etc/letsencrypt/live/$domain" ]]; then
+    certbot renew --cert-name "$domain" --quiet || true
+    say "TLS: certificate present for $domain"
+    return 0
+  fi
+  if dns_matches "$domain"; then
+    certbot --nginx -d "$domain" --non-interactive --agree-tos -m "${email:-admin@$domain}" --redirect --quiet \
+      && say "TLS: https://$domain is live" && return 0
+    say "TLS: certbot failed for $domain (rate limit or DNS still propagating). Retry later: ssh vps tls $name"
+    return 1
+  fi
+  say "TLS: $domain doesn't point at this server yet. Add a DNS A record (or a wildcard), then: ssh vps tls $name"
+  return 1
+}
+
+cmd_deploy() {
+  local name="${1:-}" sha="${2:-}"
+  need_app "$name"
+  local dir repo log port
+  dir="$(app_dir "$name")"; repo="$GITS/$name.git"; log="$dir/shared/deploy.log"; port="$(conf_get "$name" PORT)"
+  exec 9>"/run/vps-agent-$name.lock"
+  flock -n 9 || die "another deploy of $name is running"
+  [[ -n "$sha" ]] || sha="$(git --git-dir="$repo" rev-parse --verify -q refs/heads/main || git --git-dir="$repo" rev-parse --verify -q refs/heads/master || true)"
+  [[ "$sha" =~ ^[0-9a-f]{7,40}$ ]] || die "nothing to deploy: push main first (git push vps main)"
+  local short="${sha:0:7}" rel; rel="$dir/releases/$(date +%Y%m%d%H%M%S)-$short"
+  : > "$log"
+  say "deploying $name @ $short (log: ssh vps logs $name --deploy)"
+  mkdir -p "$rel"
+  git --git-dir="$repo" archive "$sha" | tar -x -C "$rel"
+  chown -R "app-$name:app-$name" "$rel"
+  local cfg="$rel/deploy/vps.json"
+  [[ -f "$cfg" ]] || { rm -rf "$rel"; die "deploy/vps.json is missing in the repo (see the vps skill for the format)"; }
+  jq empty "$cfg" 2>/dev/null || { rm -rf "$rel"; die "deploy/vps.json is not valid JSON"; }
+
+  local api_dir api_runtime api_install api_build api_migrate api_start api_health web_dir web_build has_api=no
+  api_dir="$(json "$cfg" '.api.dir')"; api_dir="${api_dir:-.}"
+  api_runtime="$(json "$cfg" '.api.runtime')"
+  api_start="$(json "$cfg" '.api.start')"
+  api_install="$(json "$cfg" '.api.install')"
+  api_build="$(json "$cfg" '.api.build')"
+  api_migrate="$(json "$cfg" '.api.migrate')"
+  api_health="$(json "$cfg" '.api.health')"
+  web_dir="$(json "$cfg" '.web.dir')"; web_dir="${web_dir:-.}"
+  web_build="$(json "$cfg" '.web.build')"
+  for v in "$api_dir" "$web_dir"; do
+    [[ "$v" =~ ^[A-Za-z0-9._/-]+$ && "$v" != *..* ]] || die "dir '$v' in deploy/vps.json isn't allowed"
+  done
+  for v in "$api_start" "$api_install" "$api_build" "$api_migrate" "$web_build"; do one_line "$v" "commands in deploy/vps.json"; done
+  if [[ -n "$api_start" ]]; then
+    has_api=yes
+    if [[ -z "$api_install" ]]; then
+      case "$api_runtime" in
+        python) api_install="python3 -m venv venv && venv/bin/pip install -q --upgrade pip && venv/bin/pip install -q -r requirements.txt" ;;
+        node) api_install="npm ci --no-audit --no-fund --loglevel=error" ;;
+        "") ;;
+        *) die "api.runtime must be python or node" ;;
+      esac
+    fi
+  fi
+
+  fail() {
+    say "FAILED: $1. Last log lines:"
+    tail -n 25 "$log" | cut -c1-300
+    rm -rf "$rel"
+    exit 1
+  }
+  if [[ -n "$web_build" ]]; then
+    say "web: $web_build"
+    as_app "$name" "$rel/$web_dir" "$web_build" >> "$log" 2>&1 || fail "web build"
+  fi
+  if [[ "$has_api" == yes ]]; then
+    if [[ -n "$api_install" ]]; then
+      say "api install"
+      as_app "$name" "$rel/$api_dir" "$api_install" >> "$log" 2>&1 || fail "api install"
+    fi
+    if [[ -n "$api_build" ]]; then
+      say "api build"
+      as_app "$name" "$rel/$api_dir" "$api_build" >> "$log" 2>&1 || fail "api build"
+    fi
+    if [[ -n "$api_migrate" ]]; then
+      say "migrate: $api_migrate"
+      as_app "$name" "$rel/$api_dir" "$api_migrate" >> "$log" 2>&1 || fail "migration"
+    fi
+  fi
+
+  local prev=""; [[ -L "$dir/current" ]] && prev="$(readlink -f "$dir/current")"
+  ln -sfn "$rel" "$dir/current.new" && mv -T "$dir/current.new" "$dir/current"
+  if [[ "$has_api" == yes ]]; then
+    cat > "$dir/shared/start.sh" <<EOF
+#!/bin/bash
+# Generated by vps-agent from deploy/vps.json on each deploy.
+set -a; . "$dir/shared/.env"; set +a
+cd "$dir/current/$api_dir"
+exec $api_start
+EOF
+    chown root:root "$dir/shared/start.sh"; chmod 755 "$dir/shared/start.sh"
+    write_unit "$name"
+    systemctl restart "app-$name"
+  fi
+  render_locations "$name" "$port" "$cfg" "$rel" > "$NGINX_SNIPPETS/$name.conf.new"
+  cp -f "$NGINX_SNIPPETS/$name.conf" "$NGINX_SNIPPETS/$name.conf.bak" 2>/dev/null || true
+  mv -f "$NGINX_SNIPPETS/$name.conf.new" "$NGINX_SNIPPETS/$name.conf"
+  if ! reload_nginx >> "$log" 2>&1; then
+    cp -f "$NGINX_SNIPPETS/$name.conf.bak" "$NGINX_SNIPPETS/$name.conf"; reload_nginx || true
+    [[ -n "$prev" ]] && ln -sfn "$prev" "$dir/current"
+    [[ "$has_api" == yes ]] && systemctl restart "app-$name"
+    fail "nginx rejected the generated config (rolled back)"
+  fi
+
+  if health_check "$name" "$port" "$api_health" "$has_api"; then
+    conf_set "$name" DEPLOYED "$short $(date -Is)"
+    ls -1dt "$dir"/releases/*/ | tail -n +$((KEEP_RELEASES + 1)) | xargs -r rm -rf
+    say "OK: $name @ $short is live at https://$(conf_get "$name" DOMAIN)/"
+  else
+    say "health check failed; rolling back"
+    journalctl -u "app-$name" -n 20 --no-pager 2>/dev/null | cut -c1-300 >> "$log" || true
+    if [[ -n "$prev" ]]; then
+      ln -sfn "$prev" "$dir/current"
+      [[ "$has_api" == yes ]] && systemctl restart "app-$name"
+      say "rolled back to $(basename "$prev")"
+    fi
+    fail "health check (${api_health:-/} didn't answer within 30 s)"
+  fi
+}
+
+cmd_status() {
+  local name="$1"; need_app "$name"
+  local domain port; domain="$(conf_get "$name" DOMAIN)"; port="$(conf_get "$name" PORT)"
+  echo "app:      $name"
+  echo "domain:   https://$domain/  (TLS: $([[ -d /etc/letsencrypt/live/$domain ]] && echo yes || echo 'no - ssh vps tls '"$name"))"
+  echo "service:  $(systemctl is-active "app-$name" 2>/dev/null || echo 'none (static site)') on port $port"
+  echo "deployed: $(conf_get "$name" DEPLOYED)"
+  echo "database: $(conf_get "$name" DB)"
+  echo "site:     HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: $domain" http://127.0.0.1/ || echo '-')"
+}
+
+cmd_logs() {
+  local name="$1"; shift || true; need_app "$name"
+  local n=50 which=service
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n) n="${2:-50}"; shift 2 ;;
+      --deploy) which=deploy; shift ;;
+      *) die "unknown option '$1'" ;;
+    esac
+  done
+  [[ "$n" =~ ^[0-9]+$ ]] || die "bad -n"
+  (( n > 200 )) && n=200
+  if [[ "$which" == deploy ]]; then
+    tail -n "$n" "$(app_dir "$name")/shared/deploy.log" 2>/dev/null | cut -c1-300 || echo "(no deploy log yet)"
+  else
+    journalctl -u "app-$name" -n "$n" --no-pager -o short-iso 2>/dev/null | cut -c1-300
+  fi
+}
+
+cmd_env_keys() {
+  local name="$1"; need_app "$name"
+  sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$(app_dir "$name")/shared/.env"
+}
+
+cmd_env_set() {
+  local name="$1"; shift || true; need_app "$name"
+  [[ $# -gt 0 ]] || die "usage: env-set <app> KEY=VALUE [...]"
+  local envf; envf="$(app_dir "$name")/shared/.env"
+  local kv key val
+  for kv in "$@"; do
+    key="${kv%%=*}"; val="${kv#*=}"
+    [[ "$kv" == *=* && "$key" =~ $KEY_RE ]] || die "bad KEY=VALUE '$kv'"
+    [[ " $RESERVED_KEYS " != *" $key "* ]] || die "$key is managed by vps-agent and can't be set"
+    grep -v "^$key=" "$envf" > "$envf.tmp" || true
+    echo "$key=$val" >> "$envf.tmp"
+    mv "$envf.tmp" "$envf"
+    say "set $key"
+  done
+  chown "app-$name:app-$name" "$envf"; chmod 600 "$envf"
+  systemctl is-enabled "app-$name" >/dev/null 2>&1 && systemctl restart "app-$name" && say "restarted app-$name"
+  return 0
+}
+
+db_name_of() { echo "${1//-/_}"; }
+
+cmd_backup() {
+  local target="${1:-}"
+  if [[ "$target" == "--all" ]]; then
+    local f
+    for f in "$APPS"/*/app.conf; do
+      [[ -f "$f" ]] || continue
+      grep -qx "DB=yes" "$f" && cmd_backup "$(basename "$(dirname "$f")")"
+    done
+    return 0
+  fi
+  need_app "$target"
+  [[ "$(conf_get "$target" DB)" == yes ]] || { say "$target has no database"; return 0; }
+  local out="$BACKUPS/$target" file
+  mkdir -p "$out"; chown postgres:postgres "$out"; chmod 700 "$out"
+  file="$out/$target-$(date +%Y%m%d-%H%M%S).dump"
+  sudo -u postgres pg_dump -Fc -f "$file" "$(db_name_of "$target")"
+  find "$out" -name '*.dump' -mtime +"$KEEP_BACKUPS" -delete
+  say "backup: $file ($(du -h "$file" | cut -f1))"
+}
+
+cmd_backups() {
+  local name="$1"; need_app "$name"
+  ls -1t "$BACKUPS/$name"/*.dump 2>/dev/null | head -20 || echo "(none)"
+}
+
+cmd_rollback() {
+  local name="$1"; need_app "$name"
+  local dir cur prev; dir="$(app_dir "$name")"; cur="$(readlink -f "$dir/current" || true)"
+  prev="$(ls -1dt "$dir"/releases/*/ | sed 's#/$##' | grep -vx "$cur" | head -1 || true)"
+  [[ -n "$prev" ]] || die "no previous release to roll back to"
+  ln -sfn "$prev" "$dir/current"
+  systemctl is-enabled "app-$name" >/dev/null 2>&1 && systemctl restart "app-$name"
+  conf_set "$name" DEPLOYED "$(basename "$prev" | sed 's/^[0-9]*-//') (rollback $(date -Is))"
+  say "rolled back to $(basename "$prev")"
+}
+
+admin_only() {
+  [[ "${SUDO_USER:-}" != "$DEPLOY_USER" && "$(id -un)" != "$DEPLOY_USER" ]] \
+    || die "'$1' is admin-only: run it with sudo from your own login on the server"
+}
+
+cmd_restore() {
+  admin_only restore
+  local name="$1" file="${2:-}"; need_app "$name"
+  [[ -f "$file" ]] || die "dump file '$file' not found (see: vps-agent backups $name)"
+  say "taking a safety backup first"
+  cmd_backup "$name"
+  systemctl stop "app-$name" 2>/dev/null || true
+  sudo -u postgres pg_restore --clean --if-exists --no-owner --role="$(db_name_of "$name")" \
+    -d "$(db_name_of "$name")" "$file"
+  systemctl start "app-$name" 2>/dev/null || true
+  say "restored $file into $name"
+}
+
+cmd_destroy() {
+  admin_only destroy
+  local name="$1"; shift || true; need_app "$name"
+  local yes=no dropdb=no
+  for a in "$@"; do [[ "$a" == --yes ]] && yes=yes; [[ "$a" == --drop-db ]] && dropdb=yes; done
+  [[ "$yes" == yes ]] || die "add --yes to really remove $name"
+  [[ "$(conf_get "$name" DB)" == yes ]] && cmd_backup "$name"
+  systemctl disable --now "app-$name" 2>/dev/null || true
+  rm -f "/etc/systemd/system/app-$name.service" "/etc/nginx/sites-enabled/app-$name" \
+        "/etc/nginx/sites-available/app-$name" "$NGINX_SNIPPETS/$name.conf"
+  systemctl daemon-reload; reload_nginx || true
+  if [[ "$dropdb" == yes ]]; then
+    sudo -u postgres dropdb --if-exists "$(db_name_of "$name")"
+    sudo -u postgres psql -qc "DROP ROLE IF EXISTS \"$(db_name_of "$name")\""
+  fi
+  rm -rf "$(app_dir "$name")" "$GITS/$name.git"
+  userdel "app-$name" 2>/dev/null || true
+  say "removed $name (backups kept in $BACKUPS/$name)"
+}
+
+# ---------------------------------------------------------------- dispatch
+
+main() {
+  if [[ "${1:-}" == "--ssh" ]]; then ssh_mode; fi
+  local cmd="${1:-help}"; shift || true
+  case "$cmd" in
+    help|-h|--help) usage; return ;;
+    version) echo "vps-agent $VERSION"; return ;;
+    _render-locations) [[ -n "$TEST" ]] || die "test only"; render_locations "$@"; return ;;
+  esac
+  if [[ $EUID -ne 0 ]]; then
+    [[ -n "$TEST" ]] && die "would need root for '$cmd'"
+    exec sudo -n "$SELF" "$cmd" "$@"
+  fi
+  case "$cmd" in
+    list) cmd_list ;;
+    create) cmd_create "$@" ;;
+    deploy) cmd_deploy "$@" ;;
+    status) cmd_status "${1:-}" ;;
+    logs) cmd_logs "$@" ;;
+    env-keys) cmd_env_keys "${1:-}" ;;
+    env-set) cmd_env_set "$@" ;;
+    backup) cmd_backup "${1:-}" ;;
+    backups) cmd_backups "${1:-}" ;;
+    tls) cmd_tls "${1:-}" ;;
+    rollback) cmd_rollback "${1:-}" ;;
+    restore) cmd_restore "$@" ;;
+    destroy) cmd_destroy "$@" ;;
+    *) die "unknown command '$cmd' (try: help)" ;;
+  esac
+}
+
+main "$@"

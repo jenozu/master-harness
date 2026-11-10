@@ -16,7 +16,9 @@
   defaults for secrets. Agents can't read `.env`; pass values through the environment.
 - No destructive commands outside local dev/test data: no dropping or truncating real data, `rm -rf` outside the
   repo, `git push --force`, `git reset --hard` on shared branches.
-- Never ssh to a server, deploy, or spend money unless the human asked for it in this session.
+- Never ssh to a server or deploy unless the human asked for it, or it's a planned deploy task done through the
+  `vps` skill (`ssh vps ...`, `git push vps main`): that key is limited on the server to safe operations.
+- Never spend money or create accounts.
 
 ## Code
 - Small, direct changes that match the surrounding style. No speculative abstractions, no drive-by refactors.

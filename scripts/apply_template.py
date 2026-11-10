@@ -7,6 +7,7 @@ Bootstrap (new project; never overwrites existing files):
 
 Upgrade (existing project; replaces harness-owned files, backs up the old ones, never touches project content):
   python scripts/apply_template.py --target <repo> --upgrade [--values values.json]
+  Library pieces can be added during an upgrade too (created only if missing): --skills vps --settings vps
 
 values.json: {"PROJECT_NAME": "...", ..., "dev_servers": [ {...} ]}. See docs/placeholders.md.
 --dry-run prints what would happen without writing anything.
@@ -59,9 +60,15 @@ def union(a, b):
 
 
 def merge_settings(base, extra):
+    """Union permission lists and env; a fragment's "remove" lists take rules out (e.g. an ask rule that would
+    override the fragment's allow rules, since ask beats allow)."""
     out = json.loads(json.dumps(base))
     for k, v in extra.items():
-        if k == "permissions":
+        if k == "remove":
+            perms = out.setdefault("permissions", {})
+            for kind, rules in v.items():
+                perms[kind] = [r for r in perms.get(kind, []) if r not in rules]
+        elif k == "permissions":
             perms = out.setdefault("permissions", {})
             for kind, rules in v.items():
                 perms[kind] = union(perms.get(kind, []), rules)
@@ -144,8 +151,8 @@ def library_files(kind, names):
     return out
 
 
-def settings_with_fragments(names):
-    settings = json.loads((TEMPLATE / ".claude/settings.json").read_text(encoding="utf-8"))
+def settings_with_fragments(names, base=None):
+    settings = base if base is not None else json.loads((TEMPLATE / ".claude/settings.json").read_text(encoding="utf-8"))
     for name in names:
         frag = LIBRARY / "settings" / f"{name}.json"
         if not frag.exists():
@@ -174,7 +181,8 @@ def bootstrap(a, plan, values):
         if dst == ".claude/settings.json":
             existing = plan.target / dst
             if existing.exists():
-                merged = merge_settings(json.loads(existing.read_text(encoding="utf-8")), settings)
+                merged = settings_with_fragments(split(a.settings), merge_settings(
+                    json.loads(existing.read_text(encoding="utf-8")), settings))
                 plan.write(dst, json.dumps(merged, indent=2) + "\n")
                 plan.notes.append("settings.json existed: merged harness permissions and env into it")
             else:
@@ -212,7 +220,7 @@ def upgrade(a, plan, values):
                 plan.created.append(dst)
             elif dst == ".claude/settings.json":
                 cur = json.loads(target.read_text(encoding="utf-8"))
-                merged = merge_settings(cur, settings_with_fragments([]))
+                merged = settings_with_fragments(split(a.settings), merge_settings(cur, settings_with_fragments([])))
                 if merged != cur:
                     plan.write(dst, json.dumps(merged, indent=2) + "\n")
                     plan.notes.append("settings.json: added new harness permissions/env (nothing removed)")
@@ -231,6 +239,12 @@ def upgrade(a, plan, values):
             shutil.copy2(target, backup / dst)
         plan.write(dst, new)
         plan.replaced.append(dst)
+    for rel, src in library_files("rules", split(a.rules)) + library_files("skills", split(a.skills)):
+        if (plan.target / rel).exists():
+            plan.kept.append(rel)
+        else:
+            plan.write(rel, fill(src.read_text(encoding="utf-8"), values))
+            plan.created.append(rel)
     ensure_gitignore(plan)
     if not plan.dry:
         vfile.parent.mkdir(exist_ok=True)

@@ -50,7 +50,8 @@ When the verifier says MANUAL CHECK NEEDED but everything automatic passed, add 
 ## Escalate to the lead (stop and return) only when
 - builder-opus failed on a task, or one task needed 2 escalations and still fails;
 - a fix would change the PRD (scope, a non-goal, a new library or service, a fixed schema or API);
-- a step needs the human: credentials, accounts, DNS, a server, money, a decision only they can make;
+- a step needs the human: credentials, accounts, DNS, money, a decision only they can make, or server access
+  beyond what the `vps` skill allows (if it's installed, creating, deploying and checking apps is agent work);
 - something destructive would be needed (dropping data, force-push, deleting user files);
 - the same builder tier escalated on 3 tasks in a row (the routing may be wrong);
 - the git check at the start found missing or empty files.

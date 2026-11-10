@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh vps *)",
+      "Bash(git push vps *)",
+      "Bash(git remote add vps *)",
+      "Bash(git remote set-url vps *)"
+    ]
+  },
+  "remove": {
+    "ask": [
+      "Bash(ssh *)",
+      "Bash(git push *)"
+    ]
+  }
+}

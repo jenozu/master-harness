@@ -22,6 +22,7 @@ JSON list becomes a markdown bullet list. `check_harness.py` fails while any `{{
 | `DATE` | memory.md, tasks.json | Automatic (today), override if needed |
 | `HARNESS_VERSION` | CLAUDE.md, memory.md | Automatic, from `VERSION` |
 
+Library skill `vps` uses `VPS_APP` (lowercase slug, the app's name on the server) and `VPS_DOMAIN`.
 Library skill `deploy-vps` also uses: `DEPLOY_APP_PATH`, `DEPLOY_SERVICE`, `DEPLOY_SCRIPT`, `HEALTH_URL`, `SITE_URL`.
 
 Example: `tests/fixtures/sample/values.json`.

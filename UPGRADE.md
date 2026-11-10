@@ -33,6 +33,15 @@ Then:
 4. `rm -rf .harness-tmp .harness-backup`, commit `harness: upgrade to v<new>`, and report in at most 8 lines:
    version change, files replaced, customizations moved, project actions done.
 
+## Add the VPS kit to an existing project
+If `ssh -o BatchMode=yes vps version` works on this computer and the project should deploy there:
+```
+python .harness-tmp/scripts/apply_template.py --target . --upgrade --skills vps --settings vps
+```
+Then fill `{{VPS_APP}}` / `{{VPS_DOMAIN}}` in `.claude/skills/vps/SKILL.md`, add `vps` to CLAUDE.md's Project
+skills, and replace any old deploy tasks with the vps flow (`/adapt`). An app already running on the server
+outside the kit (e.g. under /var/www) keeps running; moving it is a planned task with a backup first.
+
 ## 3. Migration from a pre-harness setup (e.g. projects built before master-harness existed)
 Do these, then run step 2 (the upgrade will replace the old agents and skills, backing them up):
 1. **Phases into tasks.json.** Find the phase list (usually in the old `phase-runner.md`, `run-phase/SKILL.md` or

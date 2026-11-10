@@ -25,8 +25,8 @@
       "Bash(curl -fsS *)"
     ],
     "ask": [
-      "Bash(git push *)",
-      "Bash(ssh *)",
+      "Bash(git push)",
+      "Bash(git push origin *)",
       "Bash(scp *)",
       "Bash(rsync *)"
     ],

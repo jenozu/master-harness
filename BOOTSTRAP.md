@@ -53,10 +53,17 @@ the frontmatter fields used by the template's agents and skills are still suppor
 renamed or removed, adapt the installed copies and tell the human in the report so the template can be updated.
 
 ## 5. Choose library pieces
+First, is the owner's VPS kit set up on this computer? `cat ~/.claude/vps.json 2>/dev/null` and
+`ssh -o BatchMode=yes -o ConnectTimeout=8 vps version`. If both work and the PRD deploys to a server (or says
+nothing about hosting and is a web app), use the VPS: skill `vps` + settings `vps`, and values `VPS_APP` (short
+lowercase slug of the project name) and `VPS_DOMAIN` (`<VPS_APP>.<apps_domain>` from vps.json, or the PRD's own
+domain). If the PRD wants the VPS but the kit isn't set up, add a phase-0 `human` task: "Set up the VPS kit: see
+library/vps-kit/README.md in master-harness". Don't use `deploy-vps` when the kit is available.
+
 `ls .harness-tmp/library/{rules,skills,settings}`. Pick what matches this stack and PRD, nothing speculative:
 - rules: one per area of the stack (backend language/framework, frontend, database, scripts, phone-first UI);
-- skills: `db-migration` if there's a database, `mobile-ui-check` for phone UIs, `deploy-vps` if it deploys to a
-  VPS, `security-review` if there's auth or user data;
+- skills: `db-migration` if there's a database, `mobile-ui-check` for phone UIs, `vps` (see above) or
+  `deploy-vps` (a server without the kit), `security-review` if there's auth or user data;
 - settings: fragments for the package managers and tools in use.
 
 ## 6. Write the values and apply

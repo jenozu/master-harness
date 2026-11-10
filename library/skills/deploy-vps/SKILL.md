@@ -1,6 +1,6 @@
 ---
 name: deploy-vps
-description: Push and deploy to the project's own VPS (nginx + systemd style), then check it's healthy. Only when the human explicitly asks to deploy.
+description: Push and deploy to a VPS that does NOT have the master-harness VPS kit (custom nginx + systemd setup), then check it's healthy. Only when the human explicitly asks to deploy. With the kit, use the vps skill instead.
 disable-model-invocation: true
 argument-hint: "[ssh-target, e.g. me@app.example.com]"
 ---

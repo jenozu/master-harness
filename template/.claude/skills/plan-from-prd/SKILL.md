@@ -23,6 +23,9 @@ never touches existing tasks).
   migrations if there is a database, test runner, a first passing test.
 - **Middle phases:** one user-visible slice each (the core loop first, then supporting features).
 - **Ship:** production build, hosting/server setup, deploy, backups, monitoring basics.
+  If the `vps` skill is installed, these are agent tasks, not human ones: production config read from env vars
+  (`review`), `deploy/vps.json`, `ssh vps create` + first `git push vps main`, smoke test + TLS. Only secrets the
+  owner must supply (third-party API keys) and DNS (if there's no wildcard apps domain) are `human` tasks.
 - **Live with it (optional):** close registration, first real use, fix-up from real feedback.
 
 Write them to `metadata.phases` as `[{"id": 0, "name": "Foundation"}, ...]`.

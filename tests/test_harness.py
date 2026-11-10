@@ -3,6 +3,7 @@
 Run from the repo root:  python -m unittest discover -s tests -q
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -30,7 +31,7 @@ class Project:
     """A scratch project with the harness applied."""
 
     def __init__(self, rules="python-fastapi,react-vite-tailwind,pwa-mobile",
-                 skills="db-migration,mobile-ui-check,deploy-vps", settings="python,node"):
+                 skills="db-migration,mobile-ui-check,vps", settings="python,node,vps"):
         self.dir = Path(tempfile.mkdtemp(prefix="harness-"))
         git(self.dir, "init", "-q")
         (self.dir / "backend").mkdir()
@@ -82,7 +83,12 @@ class ApplyAndCheck(unittest.TestCase):
         self.assertIn("Bash(npm install *)", settings["permissions"]["ask"])
         self.assertIn("- What domain will the app use?", (d / ".claude/rules/memory.md").read_text())
         self.assertIn(".harness-tmp/", (d / ".gitignore").read_text())
-        self.assertTrue((d / ".claude/skills/deploy-vps/SKILL.md").exists())
+        self.assertTrue((d / ".claude/skills/vps/SKILL.md").exists())
+        self.assertIn("ssh vps status habit-dots", (d / ".claude/skills/vps/SKILL.md").read_text())
+        self.assertIn("Bash(ssh vps *)", settings["permissions"]["allow"])
+        self.assertNotIn("Bash(ssh *)", settings["permissions"]["ask"], "ask beats allow: must not block ssh vps")
+        self.assertNotIn("Bash(git push *)", settings["permissions"]["ask"])
+        self.assertIn("Bash(git push origin *)", settings["permissions"]["ask"])
 
     def test_bootstrap_never_overwrites(self):
         d = self.p.dir
@@ -134,7 +140,22 @@ class ApplyAndCheck(unittest.TestCase):
         self.assertEqual((d / ".claude/rules/memory.md").read_text(), mem_before)
         self.assertTrue((d / ".claude/agents/reviewer.md").exists())
         self.assertIn("0.9.0 ->", out)
-        self.assertTrue((d / ".claude/skills/deploy-vps/SKILL.md").exists(), "library skills untouched")
+        self.assertTrue((d / ".claude/skills/vps/SKILL.md").exists(), "library skills untouched")
+
+    def test_upgrade_adds_vps_and_removes_blocking_ask_rules(self):
+        d = self.p.dir
+        shutil.rmtree(d / ".claude/skills/vps")
+        s = json.loads((d / ".claude/settings.json").read_text())
+        s["permissions"]["ask"] += ["Bash(ssh *)", "Bash(git push *)"]
+        s["permissions"]["allow"] = [r for r in s["permissions"]["allow"] if "vps" not in r]
+        (d / ".claude/settings.json").write_text(json.dumps(s))
+        run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(d), "--upgrade",
+             "--values", str(FIX / "values.json"), "--skills", "vps", "--settings", "vps"], ROOT)
+        s = json.loads((d / ".claude/settings.json").read_text())
+        self.assertIn("Bash(ssh vps *)", s["permissions"]["allow"])
+        self.assertNotIn("Bash(ssh *)", s["permissions"]["ask"])
+        self.assertNotIn("Bash(git push *)", s["permissions"]["ask"])
+        self.assertIn("habit-dots", (d / ".claude/skills/vps/SKILL.md").read_text())
 
 
 class TasksPy(unittest.TestCase):
@@ -202,6 +223,79 @@ class DevServer(unittest.TestCase):
         finally:
             run([PY, ".claude/scripts/devserver.py", "stop", "all"], p.dir, check=False)
             p.cleanup()
+
+
+AGENT = ROOT / "library/vps-kit/server/vps-agent"
+NO_BASH = os.name == "nt" or not shutil.which("bash")
+
+
+@unittest.skipIf(NO_BASH, "vps-agent runs on Linux servers")
+class VpsAgent(unittest.TestCase):
+    def ssh(self, command):
+        env = dict(os.environ, VPS_AGENT_TEST="1", SSH_ORIGINAL_COMMAND=command)
+        r = subprocess.run(["bash", str(AGENT), "--ssh"], capture_output=True, text=True, env=env)
+        return (r.stdout + r.stderr).strip()
+
+    def test_allowed_commands_go_through_sudo(self):
+        for cmd in ("status myapp", "deploy my-app abc1234", "env-set myapp FOO=bar", "logs myapp -n 20",
+                    "create myapp --db --ext pg_trgm,unaccent", "backup myapp", "tls myapp", "rollback myapp"):
+            self.assertIn(f"EXEC sudo -n /usr/local/sbin/vps-agent {cmd}", self.ssh(cmd), cmd)
+
+    def test_everything_else_is_refused(self):
+        for cmd in ("restore myapp /x.dump", "destroy myapp --yes", "bash", "cat /etc/shadow",
+                    "status myapp; rm -rf /", "status myapp && id", "logs $(whoami)", "logs `id`",
+                    "env-set myapp A='x y'", "status myapp | sh", "status myapp\nid",
+                    "git-upload-pack '/srv/git/myapp.git'", "git-receive-pack '/etc/passwd'",
+                    "git-receive-pack '/srv/git/../../etc.git'"):
+            out = self.ssh(cmd)
+            self.assertNotIn("EXEC", out, cmd)
+            self.assertIn("ERROR", out, cmd)
+
+    def test_app_names_validated(self):
+        # the filter passes plain tokens; every root subcommand then validates the app name
+        script = AGENT.read_text()
+        import re
+        name_re = re.search(r"NAME_RE='([^']+)'", script).group(1)
+        for bad in ("../etc", "My_App", "a", "-x", "x" * 40, "app;id"):
+            self.assertIsNone(re.match(name_re, bad), bad)
+        self.assertIsNotNone(re.match(name_re, "habit-dots"))
+        self.assertIn('need_app "$name"', script)
+
+    def test_git_push_path(self):
+        self.assertIn("no git repo for 'myapp'", self.ssh("git-receive-pack '/srv/git/myapp.git'"))
+        self.assertIn("no git repo for 'myapp'", self.ssh("git-receive-pack 'myapp.git'"))
+
+    def test_empty_command_shows_help(self):
+        self.assertIn("deploy gatekeeper", self.ssh(""))
+
+    def render(self, cfg):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+        env = dict(os.environ, VPS_AGENT_TEST="1")
+        r = subprocess.run(["bash", str(AGENT), "_render-locations", "demo", "8101", f.name, "x"],
+                           capture_output=True, text=True, env=env)
+        os.unlink(f.name)
+        return r.stdout + r.stderr
+
+    def test_nginx_rendering(self):
+        full = self.render({"web": {"dir": "frontend", "out": "dist"},
+                            "api": {"dir": "backend", "runtime": "python", "start": "x"}})
+        self.assertIn("location /api/ {", full)
+        self.assertIn("proxy_pass http://127.0.0.1:8101/;", full)
+        self.assertIn("root /srv/apps/demo/current/frontend/dist;", full)
+        nxt = self.render({"api": {"runtime": "node", "start": "npm start"}})
+        self.assertIn("location / {", nxt)
+        self.assertIn("proxy_pass http://127.0.0.1:8101;", nxt)
+        self.assertNotIn("root ", nxt)
+        bad = self.render({"web": {"dir": "x;rm", "out": "dist"}})
+        self.assertIn("ERROR", bad)
+
+    @unittest.skipUnless(shutil.which("shellcheck"), "shellcheck not installed")
+    def test_shellcheck(self):
+        kit = ROOT / "library/vps-kit"
+        r = subprocess.run(["shellcheck", "-S", "warning", str(AGENT), str(kit / "server/bootstrap.sh"),
+                            str(kit / "setup_vps.sh")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout)
 
 
 if __name__ == "__main__":
