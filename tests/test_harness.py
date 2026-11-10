@@ -158,6 +158,37 @@ class ApplyAndCheck(unittest.TestCase):
         self.assertIn("habit-dots", (d / ".claude/skills/vps/SKILL.md").read_text())
 
 
+class OpenPermissions(unittest.TestCase):
+    def setUp(self):
+        # "open" is listed first on purpose: it must still be merged last
+        self.p = Project(rules="", skills="", settings="open,python,node,vps")
+
+    def tearDown(self):
+        self.p.cleanup()
+
+    def perms(self):
+        return json.loads((self.p.dir / ".claude/settings.json").read_text())["permissions"]
+
+    def test_open_allows_everything_but_keeps_safety_denies(self):
+        p = self.perms()
+        for rule in ("Bash", "Edit", "Write"):
+            self.assertIn(rule, p["allow"])
+        for rule in ("Bash(git push origin *)", "Bash(npm install *)", "Bash(pip install *)", "Bash(scp *)"):
+            self.assertNotIn(rule, p["ask"], "ask beats allow: open must not leave this prompting")
+        for rule in ("Bash(git push --force *)", "Bash(git reset --hard *)", "Read(./.env)", "Read(~/.ssh/**)"):
+            self.assertIn(rule, p["deny"])
+        self.assertIn("Bash(npx prisma migrate reset *)", p["ask"], "destructive DB reset still asks")
+
+    def test_plain_upgrade_does_not_bring_the_asks_back(self):
+        d = self.p.dir
+        run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(d), "--upgrade",
+             "--values", str(FIX / "values.json")], ROOT)
+        p = self.perms()
+        self.assertIn("Bash", p["allow"])
+        self.assertNotIn("Bash(git push origin *)", p["ask"])
+        self.assertIn("Bash(git push --force *)", p["deny"])
+
+
 class TasksPy(unittest.TestCase):
     def setUp(self):
         self.p = Project(rules="", skills="", settings="")

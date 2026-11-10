@@ -33,6 +33,14 @@ Then:
 4. `rm -rf .harness-tmp .harness-backup`, commit `harness: upgrade to v<new>`, and report in at most 8 lines:
    version change, files replaced, customizations moved, project actions done.
 
+## Switch a project to open permissions
+```
+python .harness-tmp/scripts/apply_template.py --target . --upgrade --settings open
+```
+Allows all shell commands, edits and web access, drops the `ask` prompts for push/scp/rsync/installs, and keeps
+the deny rules. Later plain upgrades notice the project is open and don't bring the prompts back. To go back,
+re-copy `template/.claude/settings.json` and re-run with your stack fragments.
+
 ## Add the VPS kit to an existing project
 If `ssh -o BatchMode=yes vps version` works on this computer and the project should deploy there:
 ```

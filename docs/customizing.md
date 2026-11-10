@@ -6,7 +6,8 @@
 - **Skill:** `library/skills/<name>/SKILL.md`. Use `{{UPPER_CASE}}` for values BOOTSTRAP must fill, and list them
   in `docs/placeholders.md`. Use only fields in `SKILL_FIELDS` (check_harness.py).
 - **Permissions:** `library/settings/<tool>.json` with `permissions.allow` / `ask` / `deny` lists. They're merged
-  as unions, so fragments never remove anything.
+  as unions. A fragment can also take rules out with a `"remove"` block (see `vps.json`, `open.json`).
+  `open` is merged last whatever order `--settings` lists it in.
 - Mention it in BOOTSTRAP.md step 5 if it needs a hint about when to pick it.
 
 ## Change routing or models

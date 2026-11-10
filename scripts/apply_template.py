@@ -153,6 +153,8 @@ def library_files(kind, names):
 
 def settings_with_fragments(names, base=None):
     settings = base if base is not None else json.loads((TEMPLATE / ".claude/settings.json").read_text(encoding="utf-8"))
+    # "open" removes ask rules the other fragments add, so it must be merged last whatever order was given.
+    names = [n for n in names if n != "open"] + (["open"] if "open" in names else [])
     for name in names:
         frag = LIBRARY / "settings" / f"{name}.json"
         if not frag.exists():
@@ -220,7 +222,10 @@ def upgrade(a, plan, values):
                 plan.created.append(dst)
             elif dst == ".claude/settings.json":
                 cur = json.loads(target.read_text(encoding="utf-8"))
-                merged = settings_with_fragments(split(a.settings), merge_settings(cur, settings_with_fragments([])))
+                names = split(a.settings)
+                if "Bash" in cur.get("permissions", {}).get("allow", []) and "open" not in names:
+                    names.append("open")  # project already runs open: keep upgrades from re-adding the ask rules
+                merged = settings_with_fragments(names, merge_settings(cur, settings_with_fragments([])))
                 if merged != cur:
                     plan.write(dst, json.dumps(merged, indent=2) + "\n")
                     plan.notes.append("settings.json: added new harness permissions/env (nothing removed)")

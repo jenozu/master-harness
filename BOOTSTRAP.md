@@ -64,7 +64,10 @@ library/vps-kit/README.md in master-harness". Don't use `deploy-vps` when the ki
 - rules: one per area of the stack (backend language/framework, frontend, database, scripts, phone-first UI);
 - skills: `db-migration` if there's a database, `mobile-ui-check` for phone UIs, `vps` (see above) or
   `deploy-vps` (a server without the kit), `security-review` if there's auth or user data;
-- settings: fragments for the package managers and tools in use.
+- settings: fragments for the package managers and tools in use. Add `open` only if the owner asks for no-prompt /
+  unattended permissions ("Permissions: open", "don't block me"); never on your own. It allows all shell commands
+  and edits and keeps the safety denies (force push, `reset --hard`, secrets, `~/.ssh`). Without it, `ask` rules
+  prompt for push, scp, rsync and installs.
 
 ## 6. Write the values and apply
 Write `.claude/tmp/harness-values.json` (gitignored) with every key in `docs/placeholders.md`: real commands that

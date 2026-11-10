@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0 (2026-11-09)
+- **`open` settings fragment** (`library/settings/open.json`): opt-in no-prompt permissions for unattended work.
+  Allows `Bash`, `Edit`, `Write`, `WebFetch`, `WebSearch`; removes the `ask` rules for git push, ssh/scp/rsync and
+  package installs; keeps every deny (force push, `reset --hard`, `clean -fdx`, `.env`/`.pem`/`.key`) and adds
+  `Read(~/.ssh/**)` and `rm -rf /*`. Destructive database prompts (`dropdb`, `prisma migrate reset`) still ask.
+- `apply_template.py` merges `open` last regardless of order, and `--upgrade` keeps an already-open project open.
+- Use: add `--settings open` (or tell BOOTSTRAP "Permissions: open"). Existing projects: UPGRADE.md,
+  "Switch a project to open permissions". Not applied by default.
+
 ## 1.2.0 (2026-11-09)
 - **VPS kit works on servers that already run Traefik.** `bootstrap.sh` detects a Traefik container, reads its
   config folder, certificate resolver and HTTPS entrypoint, and switches to Traefik mode: nginx only listens on

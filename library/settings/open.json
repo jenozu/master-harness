@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Edit",
+      "Write",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Bash(rm -rf /*)"
+    ]
+  },
+  "remove": {
+    "ask": [
+      "Bash(git push)",
+      "Bash(git push origin *)",
+      "Bash(git push *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(rsync *)",
+      "Bash(npm install *)",
+      "Bash(npm i *)",
+      "Bash(pip install *)",
+      "Bash(python -m pip install *)",
+      "Bash(psql *)",
+      "Bash(createdb *)"
+    ]
+  }
+}
