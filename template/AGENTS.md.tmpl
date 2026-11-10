@@ -1,0 +1,46 @@
+# Instructions for AI coding assistants (Claude Code, Cursor, Codex, Copilot...)
+
+{{PROJECT_NAME}}: {{PROJECT_SUMMARY}}
+
+This repo is built task by task from a written plan. Follow this loop exactly; it exists to stop the project
+drifting away from the plan.
+
+## Where the plan lives
+- `.taskmaster/docs/prd.md`: goal, non-goals, success criteria, stack, decision log. Read Goal and Non-goals every session.
+- `.taskmaster/tasks/tasks.json`: phases, tasks, subtasks, status, dependencies, test strategy, work log. Source of truth.
+- `.taskmaster/docs/parking-lot.md`: ideas that are NOT in the plan.
+- `.taskmaster/docs/manual-checks.md`: checks waiting for a human or an agent with a running app.
+- `TASKS.md`: generated from tasks.json. Never edit by hand.
+
+Helper (Python stdlib only), from the repo root:
+```
+python .taskmaster/tasks.py status | phase [n] | next [--phase n] | show <id>
+python .taskmaster/tasks.py set-status <id> in-progress|done|deferred|cancelled
+python .taskmaster/tasks.py log <id> "plan: ..."     # timestamped note on a task
+python .taskmaster/tasks.py add --help               # add a task or subtask
+python .taskmaster/tasks.py validate                 # after any manual edit of tasks.json
+python .taskmaster/render_tasks_md.py                # refresh TASKS.md
+```
+
+## Work loop (one task at a time)
+1. `tasks.py next`, then `tasks.py show <id>`. Complexity 7+ without subtasks: split it into 3-5 subtasks first.
+2. Read the code the task touches. Log your plan: `tasks.py log <id> "plan: files X, Y; approach ..."`.
+3. `tasks.py set-status <id> in-progress`, build it, log what worked and what failed.
+4. Run the task's testStrategy for real. Not done until it passes.
+5. Drift check, `set-status <id> done`, `render_tasks_md.py`, commit with the id: `task 7.2: <title>`.
+
+## Drift rules
+- Only work on the task `next` returned. New ideas → dated line in `parking-lot.md`.
+- Changing what's being built → PRD decision log first, then tasks, then code.
+- Never reword a `done` task; add a corrective subtask. Cancel tasks, never delete them.
+
+## Project
+- Stack: {{STACK}}
+- Install: `{{CMD_INSTALL}}`
+- Test: `{{CMD_TEST}}`
+- Lint: `{{CMD_LINT}}`
+- Build: `{{CMD_BUILD}}`
+- Dev servers: defined in `.claude/dev-servers.json`; run with `python .claude/scripts/devserver.py start all`.
+
+## Facts that are easy to get wrong
+{{PROJECT_FACTS}}

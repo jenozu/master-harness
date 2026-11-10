@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pg_isready *)"
+    ],
+    "ask": [
+      "Bash(psql *)",
+      "Bash(createdb *)",
+      "Bash(dropdb *)"
+    ]
+  }
+}

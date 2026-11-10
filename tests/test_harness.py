@@ -1,0 +1,208 @@
+"""Tests for tasks.py, apply_template.py and check_harness.py (stdlib unittest).
+
+Run from the repo root:  python -m unittest discover -s tests -q
+"""
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+FIX = ROOT / "tests" / "fixtures" / "sample"
+PY = sys.executable
+
+
+def run(args, cwd, check=True):
+    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    if check and r.returncode != 0:
+        raise AssertionError(f"{args} failed ({r.returncode}):\n{r.stdout}\n{r.stderr}")
+    return r
+
+
+def git(cwd, *args):
+    return run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd)
+
+
+class Project:
+    """A scratch project with the harness applied."""
+
+    def __init__(self, rules="python-fastapi,react-vite-tailwind,pwa-mobile",
+                 skills="db-migration,mobile-ui-check,deploy-vps", settings="python,node"):
+        self.dir = Path(tempfile.mkdtemp(prefix="harness-"))
+        git(self.dir, "init", "-q")
+        (self.dir / "backend").mkdir()
+        (self.dir / "backend/main.py").write_text("print('hi')\n")
+        (self.dir / "frontend/src").mkdir(parents=True)
+        (self.dir / "frontend/src/App.jsx").write_text("export default () => null\n")
+        self.apply_out = run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(self.dir),
+                              "--values", str(FIX / "values.json"), "--rules", rules, "--skills", skills,
+                              "--settings", settings], ROOT).stdout
+        shutil.copy(FIX / "prd.md", self.dir / ".taskmaster/docs/prd.md")
+        shutil.copy(FIX / "tasks.json", self.dir / ".taskmaster/tasks/tasks.json")
+        run([PY, ".taskmaster/render_tasks_md.py"], self.dir)
+        git(self.dir, "add", "-A")
+        git(self.dir, "commit", "-q", "-m", "bootstrap")
+
+    def tasks(self, *args, check=True):
+        return run([PY, ".taskmaster/tasks.py", *args], self.dir, check)
+
+    def check(self, *extra):
+        return run([PY, str(self.dir / ".claude/scripts/check_harness.py"), "--target", str(self.dir), *extra], ROOT, check=False)
+
+    def cleanup(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+class ApplyAndCheck(unittest.TestCase):
+    def setUp(self):
+        self.p = Project()
+
+    def tearDown(self):
+        self.p.cleanup()
+
+    def test_bootstrap_passes_checker(self):
+        self.assertNotIn("UNFILLED", self.p.apply_out)
+        r = self.p.check()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("harness OK", r.stdout)
+
+    def test_files_and_values(self):
+        d = self.p.dir
+        claude = (d / "CLAUDE.md").read_text()
+        self.assertIn("Habit Dots", claude)
+        self.assertIn("@AGENTS.md", claude)
+        self.assertEqual((d / ".claude/HARNESS_VERSION").read_text().strip(), (ROOT / "VERSION").read_text().strip())
+        servers = json.loads((d / ".claude/dev-servers.json").read_text())
+        self.assertEqual([s["name"] for s in servers], ["api", "web"])
+        settings = json.loads((d / ".claude/settings.json").read_text())
+        self.assertIn("Bash(pytest *)", settings["permissions"]["allow"])
+        self.assertIn("Bash(npm install *)", settings["permissions"]["ask"])
+        self.assertIn("- What domain will the app use?", (d / ".claude/rules/memory.md").read_text())
+        self.assertIn(".harness-tmp/", (d / ".gitignore").read_text())
+        self.assertTrue((d / ".claude/skills/deploy-vps/SKILL.md").exists())
+
+    def test_bootstrap_never_overwrites(self):
+        d = self.p.dir
+        (d / "CLAUDE.md").write_text("# mine\n@AGENTS.md\n")
+        out = run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(d),
+                   "--values", str(FIX / "values.json")], ROOT).stdout
+        self.assertEqual((d / "CLAUDE.md").read_text(), "# mine\n@AGENTS.md\n")
+        self.assertIn("kept existing", out)
+
+    def test_checker_catches_problems(self):
+        d = self.p.dir
+        (d / "CLAUDE.md").write_text((d / "CLAUDE.md").read_text() + "\n{{LEFTOVER}}\n")
+        agent = d / ".claude/agents/verifier.md"
+        agent.write_text(agent.read_text().replace("color: yellow", "color: yellow\nbogusField: 1"))
+        s = json.loads((d / ".claude/settings.json").read_text())
+        s["env"] = {}
+        (d / ".claude/settings.json").write_text(json.dumps(s))
+        (d / "backend/new_untracked.py").write_text("x = 1\n")
+        r = self.p.check()
+        self.assertEqual(r.returncode, 1)
+        for needle in ("LEFTOVER", "bogusField", "SPAWN_DEPTH", "not committed"):
+            self.assertIn(needle, r.stdout)
+
+    def test_checker_catches_secret_and_empty_plan(self):
+        d = self.p.dir
+        mem = d / ".claude/rules/memory.md"
+        mem.write_text(mem.read_text() + "\n- key: sk-" + "a" * 30 + "\n")
+        tj = d / ".taskmaster/tasks/tasks.json"
+        data = json.loads(tj.read_text())
+        data["master"]["tasks"] = []
+        tj.write_text(json.dumps(data))
+        r = self.p.check("--no-git")
+        self.assertIn("secret", r.stdout)
+        self.assertIn("no tasks yet", r.stdout)
+        r2 = self.p.check("--no-git", "--allow-empty-plan")
+        self.assertNotIn("ERROR tasks.json has no tasks", r2.stdout)
+
+    def test_upgrade_replaces_owned_backs_up_and_keeps_seeded(self):
+        d = self.p.dir
+        nt = d / ".claude/skills/next-task/SKILL.md"
+        nt.write_text(nt.read_text() + "\nlocal tweak\n")
+        mem_before = (d / ".claude/rules/memory.md").read_text() + "\n- project fact\n"
+        (d / ".claude/rules/memory.md").write_text(mem_before)
+        (d / ".claude/HARNESS_VERSION").write_text("0.9.0\n")
+        (d / ".claude/agents/reviewer.md").unlink()
+        out = run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(d), "--upgrade"], ROOT).stdout
+        self.assertNotIn("local tweak", nt.read_text())
+        self.assertIn("local tweak", (d / ".harness-backup/0.9.0/.claude/skills/next-task/SKILL.md").read_text())
+        self.assertEqual((d / ".claude/rules/memory.md").read_text(), mem_before)
+        self.assertTrue((d / ".claude/agents/reviewer.md").exists())
+        self.assertIn("0.9.0 ->", out)
+        self.assertTrue((d / ".claude/skills/deploy-vps/SKILL.md").exists(), "library skills untouched")
+
+
+class TasksPy(unittest.TestCase):
+    def setUp(self):
+        self.p = Project(rules="", skills="", settings="")
+
+    def tearDown(self):
+        self.p.cleanup()
+
+    def test_phase_listing_and_next(self):
+        out = self.p.tasks("phase").stdout
+        self.assertIn("phase 0 Foundation", out)
+        self.assertIn("current phase: 0", out)
+        self.assertIn("1 Scaffold", self.p.tasks("next").stdout)
+        r = self.p.tasks("next", "--phase", "1", check=False)
+        self.assertEqual(r.returncode, 1, "task 2 depends on 1, not done yet")
+
+    def test_next_phase_after_done(self):
+        self.p.tasks("set-status", "1", "done")
+        self.assertIn("2 Habits", self.p.tasks("next", "--phase", "1").stdout)
+        self.assertIn("current phase: 1", self.p.tasks("status").stdout)
+
+    def test_human_flag_shown(self):
+        out = self.p.tasks("phase", "3").stdout
+        self.assertIn("[HUMAN]", out)
+        self.assertIn("human-only: 5", out)
+        self.assertIn("flags: human", self.p.tasks("show", "5").stdout)
+        self.assertIn("HUMAN STEP", self.p.tasks("next", "--phase", "3").stdout)
+
+    def test_validate_phase_rules(self):
+        tj = self.p.dir / ".taskmaster/tasks/tasks.json"
+        data = json.loads(tj.read_text())
+        data["master"]["tasks"][1]["phase"] = 9
+        data["master"]["tasks"][3]["phase"] = 0  # depends on task 3 in phase 1
+        tj.write_text(json.dumps(data))
+        out = self.p.tasks("validate", check=False).stdout
+        self.assertIn("phase 9 is not in metadata.phases", out)
+        self.assertIn("later phase", out)
+
+    def test_add_defaults_phase_and_flags(self):
+        self.p.tasks("add", "--title", "Backups", "--deps", "4", "--test", "ls backups", "--review")
+        data = json.loads((self.p.dir / ".taskmaster/tasks/tasks.json").read_text())["master"]["tasks"]
+        new = data[-1]
+        self.assertEqual(new["phase"], 2)
+        self.assertTrue(new["review"])
+        self.assertIn("ok", self.p.tasks("validate").stdout)
+
+    def test_render(self):
+        md = (self.p.dir / "TASKS.md").read_text()
+        self.assertIn("# Habit Dots task checklist", md)
+        self.assertIn("## Phase 3 - Ship", md)
+        self.assertIn("**[HUMAN]**", md)
+
+
+class DevServer(unittest.TestCase):
+    def test_start_status_stop(self):
+        p = Project(rules="", skills="", settings="")
+        try:
+            cfg = [{"name": "web", "cwd": ".", "cmd": f'"{PY}" -m http.server 8799', "health": "http://localhost:8799/"}]
+            (p.dir / ".claude/dev-servers.json").write_text(json.dumps(cfg))
+            ds = [PY, ".claude/scripts/devserver.py"]
+            self.assertIn("up at", run(ds + ["start", "web"], p.dir).stdout)
+            self.assertIn("started by devserver.py", run(ds + ["status"], p.dir).stdout)
+            self.assertIn("stopped", run(ds + ["stop", "web"], p.dir).stdout)
+        finally:
+            run([PY, ".claude/scripts/devserver.py", "stop", "all"], p.dir, check=False)
+            p.cleanup()
+
+
+if __name__ == "__main__":
+    unittest.main()

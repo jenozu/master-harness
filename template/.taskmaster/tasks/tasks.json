@@ -1,0 +1,12 @@
+{
+  "master": {
+    "tasks": [],
+    "metadata": {
+      "project": "{{PROJECT_NAME}}",
+      "description": "{{PROJECT_NAME}} master plan. Source of truth; TASKS.md is generated from this.",
+      "phases": [],
+      "created": "{{DATE}}",
+      "updated": "{{DATE}}"
+    }
+  }
+}

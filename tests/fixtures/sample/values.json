@@ -1,0 +1,25 @@
+{
+  "PROJECT_NAME": "Habit Dots",
+  "PROJECT_SUMMARY": "a one-person habit tracker PWA with streaks.",
+  "STACK": "Python 3.12 + FastAPI + SQLite (backend/), React 18 + Vite + Tailwind (frontend/)",
+  "CMD_INSTALL": "cd backend && python -m venv venv && venv/bin/pip install -q -r requirements.txt; cd ../frontend && npm ci",
+  "CMD_TEST": "cd backend && venv/bin/python -m pytest -q",
+  "CMD_LINT": "cd frontend && npm run lint",
+  "CMD_BUILD": "cd frontend && npm run build",
+  "PHASES": "0 Foundation · 1 Habits API · 2 Phone UI · 3 Ship (see `tasks.py phase`)",
+  "RISKY_PATHS": ["backend/db.py (schema)", "scripts/vps/ (runs as root)"],
+  "PROJECT_FACTS": ["Single user: no auth beyond one shared secret header in v1.", "Dates are the phone's local YYYY-MM-DD; never convert through UTC."],
+  "PROJECT_SKILLS": "`db-migration` · `mobile-ui-check` · `/deploy-vps` (only when asked)",
+  "MEMORY_FACTS": ["Dev machine: Windows + Git Bash.", "Production: owner's Ubuntu VPS (domain TBD)."],
+  "OPEN_QUESTIONS": ["What domain will the app use?"],
+  "DEPLOY_APP_PATH": "/var/www/habit-dots",
+  "DEPLOY_SERVICE": "habit-dots",
+  "DEPLOY_SCRIPT": "scripts/vps/deploy.sh",
+  "HEALTH_URL": "https://habits.example.com/api/health",
+  "SITE_URL": "https://habits.example.com/",
+  "dev_servers": [
+    {"name": "api", "cwd": "backend", "cmd": "venv/bin/python -m uvicorn main:app --port 8000",
+     "cmd_windows": "venv\\Scripts\\python.exe -m uvicorn main:app --port 8000", "health": "http://localhost:8000/health"},
+    {"name": "web", "cwd": "frontend", "cmd": "npm run dev -- --port 5173 --strictPort", "health": "http://localhost:5173/"}
+  ]
+}

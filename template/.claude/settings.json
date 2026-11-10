@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "2"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python .taskmaster/tasks.py *)",
+      "Bash(python3 .taskmaster/tasks.py *)",
+      "Bash(python .taskmaster/render_tasks_md.py)",
+      "Bash(python3 .taskmaster/render_tasks_md.py)",
+      "Bash(python .claude/scripts/devserver.py *)",
+      "Bash(python3 .claude/scripts/devserver.py *)",
+      "Bash(python .claude/scripts/check_harness.py*)",
+      "Bash(python3 .claude/scripts/check_harness.py*)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git ls-files *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git stash *)",
+      "Bash(curl -s *)",
+      "Bash(curl -fsS *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(rsync *)"
+    ],
+    "deny": [
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean -fdx *)",
+      "Read(./.env)",
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)"
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "master": {
+    "tasks": [
+      {"id": 1, "title": "Scaffold backend and frontend", "description": "FastAPI app with /health and a Vite React app.",
+       "status": "pending", "priority": "high", "phase": 0, "complexity": 3, "dependencies": [],
+       "details": "backend/main.py with GET /health; frontend via npm create vite.", "testStrategy": "curl -fsS localhost:8000/health returns ok", "subtasks": []},
+      {"id": 2, "title": "Habits table and CRUD API", "description": "Create, rename, archive habits.",
+       "status": "pending", "priority": "high", "phase": 1, "complexity": 5, "dependencies": [1], "review": true,
+       "details": "backend/db.py, backend/routers/habits.py", "testStrategy": "cd backend && venv/bin/python -m pytest -q tests/test_habits.py", "subtasks": []},
+      {"id": 3, "title": "Tick and streak endpoints", "description": "Tick/untick today; streak per habit.",
+       "status": "pending", "priority": "medium", "phase": 1, "complexity": 4, "dependencies": [2],
+       "details": "backend/routers/ticks.py", "testStrategy": "pytest -q tests/test_ticks.py", "subtasks": []},
+      {"id": 4, "title": "Phone UI for habits", "description": "List, tick, streak badges at 390px.",
+       "status": "pending", "priority": "medium", "phase": 2, "complexity": 5, "dependencies": [3],
+       "details": "frontend/src/App.jsx, components/HabitRow.jsx", "testStrategy": "cd frontend && npm run build", "subtasks": []},
+      {"id": 5, "title": "Point a domain at the VPS", "description": "DNS A record and SSH access for deploy.",
+       "status": "pending", "priority": "medium", "phase": 3, "complexity": 1, "dependencies": [], "human": true,
+       "details": "Owner creates an A record and shares the ssh target.", "testStrategy": "dig +short habits.example.com returns the VPS IP", "subtasks": []}
+    ],
+    "metadata": {"project": "Habit Dots", "phases": [{"id": 0, "name": "Foundation"}, {"id": 1, "name": "Habits API"},
+                 {"id": 2, "name": "Phone UI"}, {"id": 3, "name": "Ship"}], "created": "2026-11-09", "updated": "2026-11-09"}
+  }
+}
