@@ -22,7 +22,9 @@ while the phase-runner works, don't poll it, and don't relay its progress.
   vs eyes-on; suggest `/manual-checks run` for the first kind), the next phase, and:
   "Run `/clear` then `/run-phase <next>` to start the next phase with a fresh context." Offer `git push`;
   don't push unasked.
-- **PARTIAL** (turn limit) → relaunch a fresh phase-runner right away with the same prompt. No human message.
+- **PARTIAL** (turn limit) → first make sure no subagent from that run is still running (wait for its completion
+  notification; two builders must never work in the same tree at once). Then relaunch a fresh phase-runner with
+  the same prompt. No human message.
   PARTIAL twice in a row with no new tasks done → treat it as ESCALATE.
 - **ESCALATE** → this is where you earn your keep. Read only what the report points at (`tasks.py show <id>` and
   the specific error). Then choose one:

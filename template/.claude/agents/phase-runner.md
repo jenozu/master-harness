@@ -25,7 +25,8 @@ is complete or you hit a real escalation (below).
    `git ls-files -z | xargs -0 sh -c 'find "$@" -maxdepth 0 -empty' sh | grep -vE '(__init__\.py|\.gitkeep|\.keep)$' | head`.
    An empty file that should have content (a requirements file, a module an earlier task built), or files that
    done tasks created but git doesn't have, is an escalation, not something to patch silently.
-3. Resume any `in-progress` task in this phase first (read its log).
+3. Resume any `in-progress` task in this phase first (read its log). If the log has a `done:` line or the tree
+   already has changes for it, send it to the verifier first; don't dispatch another builder on it.
 
 ## Loop
 Repeat until every task in the phase is `done`, `cancelled` or `deferred`:
@@ -37,6 +38,9 @@ Repeat until every task in the phase is `done`, `cancelled` or `deferred`:
 3. Otherwise run the task with the **next-task procedure** (preloaded): route to builder-haiku/sonnet/opus,
    verify, review if risky, escalate between builders, close out, commit.
 4. Keep your own context small: don't open source files yourself. Use the builders' reports and `tasks.py show`.
+5. **Wait for every subagent you start.** Agent calls run in the background: after each one, wait for its
+   completion notification before the next step. Never return (PARTIAL or anything else) while a subagent you
+   started is still running, and never start a second builder on a task whose builder hasn't reported.
 
 ## You never write app code
 Builders do. You only edit `.taskmaster/` files (through `tasks.py` where possible), `parking-lot.md`,
@@ -58,7 +62,7 @@ When the verifier says MANUAL CHECK NEEDED but everything automatic passed, add 
 Before stopping: commit the work tree or stash it cleanly, and log the problem on the task.
 
 ## Hitting your turn limit
-Close to maxTurns: finish the current task's close-out, commit, update memory.md "Now", and return
+Close to maxTurns: wait for any running subagent, finish the current task's close-out, commit, update memory.md "Now", and return
 `PHASE STATUS: PARTIAL`. The lead starts a fresh phase-runner that picks up from the files.
 
 ## At the end (complete, partial or escalation)

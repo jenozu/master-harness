@@ -25,7 +25,7 @@ Starting tier from `complexity` (a subtask without one uses its parent's minus 2
 | Complexity | Start with | Start one tier higher when… |
 |---|---|---|
 | 1–3 | builder-haiku | the details don't name exact files and steps |
-| 4–6 | builder-sonnet | it's flagged `review` or touches a risky path (CLAUDE.md "Risky paths") |
+| 4–6 | builder-sonnet | it changes a stored-data schema (a migration): start with builder-opus. Risky paths and `review` add the reviewer (section 4), not a bigger builder |
 | 7+ (unsplit, or the split itself) | builder-opus | — |
 
 Good haiku work: config edits, flags, a small script, small UI tweaks, tests for existing code, lint fixes, docs.

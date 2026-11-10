@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.1 (2026-11-09)
+- **Fixed a duplicate-builder bug.** A phase-runner could return PARTIAL while its builder was still running; the
+  relaunched runner then started a second builder on the same working tree (about a quarter of one phase's
+  tokens, and a risk of clobbered files). The phase-runner now waits for every subagent it starts and sends
+  half-finished tasks to the verifier before building again; the lead checks nothing is still running before it
+  relaunches after PARTIAL.
+- **Routing:** risky tasks of complexity 4-6 stay on builder-sonnet and get the reviewer, instead of jumping to
+  builder-opus. Tasks that change a stored-data schema still start on builder-opus.
+- Project action: none. Upgrade replaces the owned files (`--upgrade`).
+
 ## 1.3.0 (2026-11-09)
 - **`open` settings fragment** (`library/settings/open.json`): opt-in no-prompt permissions for unattended work.
   Allows `Bash`, `Edit`, `Write`, `WebFetch`, `WebSearch`; removes the `ask` rules for git push, ssh/scp/rsync and
