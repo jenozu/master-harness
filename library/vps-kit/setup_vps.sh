@@ -36,7 +36,12 @@ fi
 say "Installing the kit on $HOST (as $ADMIN; you may be asked for your password)"
 REMOTE_DIR="/tmp/vps-kit-$$"
 ssh "$ADMIN" "mkdir -p $REMOTE_DIR"
-scp -q "$HERE/server/bootstrap.sh" "$HERE/server/vps-agent" "$KEY.pub" "$ADMIN:$REMOTE_DIR/"
+# Git on Windows can turn line endings into CRLF, which Linux can't run: copy LF-only versions.
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+for f in bootstrap.sh vps-agent; do tr -d '\r' < "$HERE/server/$f" > "$STAGE/$f"; done
+cp "$KEY.pub" "$STAGE/claude_vps.pub"
+scp -q "$STAGE/bootstrap.sh" "$STAGE/vps-agent" "$STAGE/claude_vps.pub" "$ADMIN:$REMOTE_DIR/"
 ssh -t "$ADMIN" "cd $REMOTE_DIR && if [ \"\$(id -u)\" = 0 ]; then S=; else S=sudo; fi; \
   \$S bash bootstrap.sh --pubkey-file claude_vps.pub --email '$EMAIL' --apps-domain '$APPS_DOMAIN'; rc=\$?; \
   rm -rf $REMOTE_DIR; exit \$rc"

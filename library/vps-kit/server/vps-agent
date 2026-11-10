@@ -8,11 +8,14 @@
 #   ssh vps help                         (from a project, through the ~/.ssh/config alias "vps")
 #   sudo vps-agent restore <app> <file>  (human, on the server)
 #
+# Edge: "nginx" (default: nginx owns ports 80/443 and certbot issues certificates) or "traefik" (an existing Traefik
+# owns 80/443 and issues certificates; nginx only listens on 127.0.0.1:<FRONT> and Traefik gets one file per app).
+#
 # Layout: /srv/apps/<app>/{releases/,current -> releases/X,shared/.env,shared/start.sh,app.conf}
 #         /srv/git/<app>.git (bare, push target)   /var/backups/apps/<app>/   /etc/vps-agent/config
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 APPS=/srv/apps
 GITS=/srv/git
 BACKUPS=/var/backups/apps
@@ -31,6 +34,8 @@ EXTENSIONS="pg_trgm unaccent citext uuid-ossp pgcrypto hstore vector"
 RESERVED_KEYS="PORT APP_NAME DATABASE_URL SECRET_KEY"
 SSH_ALLOWED="help version list create deploy status logs env-keys env-set backup backups tls rollback"
 TEST="${VPS_AGENT_TEST:-}"
+[[ -z "$TEST" ]] || CONF="${VPS_AGENT_CONF:-$CONF}"
+FRONT_BASE=8500
 
 say() { echo "vps-agent: $*"; }
 die() { echo "vps-agent: ERROR: $*" >&2; exit 1; }
@@ -51,7 +56,7 @@ usage() {
 vps-agent $VERSION - deploy gatekeeper (agents: ssh vps <command>)
   list                                   apps, domains, ports, status
   create <app> [--domain D] [--db] [--ext pg_trgm,unaccent] [--port N]
-                                         new app: user, dirs, .env, git repo, nginx, TLS, database
+                                         new app: user, dirs, .env, git repo, web server, HTTPS, database
   deploy <app> [sha]                     build + migrate + switch + health check (auto rollback on failure)
                                          normally triggered by: git push vps main
   status <app>                           service, health, deployed commit, TLS
@@ -106,6 +111,15 @@ as_app() {  # run a command string as the app user, in a dir, with the app's env
     bash -c 'set -a; . "$1"; set +a; cd "$2" && eval "$3"' _ "$envf" "$dir" "$cmd"
 }
 
+edge() { local e; e="$(global EDGE)"; echo "${e:-nginx}"; }
+
+next_front_port() {  # a private local port for nginx in Traefik mode
+  local p=$FRONT_BASE used
+  used="$(cat "$APPS"/*/app.conf 2>/dev/null | sed -n 's/^FRONT=//p' | sort -n)"
+  while grep -qx "$p" <<< "$used" || ss -ltn 2>/dev/null | grep -q ":$p "; do p=$((p + 1)); done
+  echo "$p"
+}
+
 next_port() {
   local p=$PORT_BASE used
   used="$(cat "$APPS"/*/app.conf 2>/dev/null | sed -n 's/^PORT=//p' | sort -n)"
@@ -126,13 +140,14 @@ json() {  # json <file> <jq filter>  -> raw value or empty
 
 one_line() { [[ "$1" != *$'\n'* ]] || die "$2 must be a single line"; }
 
-render_site() {  # the server block; certbot later adds TLS lines to this file, so it's written once
-  local name="$1" domain="$2"
+render_site() {  # the server block; in nginx mode certbot later adds TLS lines to this file, so it's written once
+  local name="$1" domain="$2" front="${3:-}" listen
+  if [[ -n "$front" ]]; then listen="listen 127.0.0.1:$front;"
+  else listen=$'listen 80;\n    listen [::]:80;'; fi
   cat <<EOF
 # Managed by vps-agent ($name). Locations live in $NGINX_SNIPPETS/$name.conf (rewritten on deploy).
 server {
-    listen 80;
-    listen [::]:80;
+    $listen
     server_name $domain;
     client_max_body_size 20m;
     gzip on;
@@ -142,9 +157,40 @@ server {
 EOF
 }
 
+render_traefik() {  # render_traefik <name> <domain> <front-port>: one dynamic-config file for Traefik
+  local name="$1" domain="$2" front="$3" ep res
+  ep="$(global TRAEFIK_ENTRYPOINT)"; res="$(global TRAEFIK_RESOLVER)"
+  cat <<EOF
+# Managed by vps-agent ($name). Edits are overwritten; remove the app with vps-agent destroy.
+http:
+  routers:
+    vps-$name:
+      rule: "Host(\`$domain\`)"
+      entryPoints:
+        - ${ep:-websecure}
+      service: vps-$name
+      tls:
+        certResolver: ${res:-letsencrypt}
+  services:
+    vps-$name:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:$front"
+EOF
+}
+
+write_edge() {  # write_edge <name>: publish the app through Traefik (no-op in nginx mode)
+  [[ "$(edge)" == traefik ]] || return 0
+  local name="$1" dir; dir="$(global TRAEFIK_DIR)"
+  [[ -d "$dir" ]] || die "Traefik config folder '$dir' not found (see $CONF)"
+  render_traefik "$name" "$(conf_get "$name" DOMAIN)" "$(conf_get "$name" FRONT)" > "$dir/vps-$name.yml.tmp"
+  mv -f "$dir/vps-$name.yml.tmp" "$dir/vps-$name.yml"
+}
+
 render_locations() {  # render_locations <name> <port> <vps.json|""> <release-dir>
   local name="$1" port="$2" cfg="$3" current; current="$(app_dir "$name")/current"
-  local web_dir web_out api_dir api_path strip
+  local web_dir web_out api_dir api_path strip proto='$scheme' realip='$remote_addr'
+  if [[ "$(edge)" == traefik ]]; then proto=https; realip='$http_x_real_ip'; fi
   if [[ -z "$cfg" ]]; then
     echo "location / { default_type text/html; return 200 '<h1>$name is being set up</h1>'; }"
     return
@@ -164,9 +210,9 @@ location $api_path {
     proxy_pass $target;
     proxy_http_version 1.1;
     proxy_set_header Host \$host;
-    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Real-IP $realip;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Forwarded-Proto $proto;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_read_timeout 120s;
@@ -219,13 +265,13 @@ EOF
 }
 
 health_check() {  # health_check <name> <port> <path|""> <has_api>
-  local name="$1" port="$2" path="$3" has_api="$4" domain
-  domain="$(conf_get "$name" DOMAIN)"
+  local name="$1" port="$2" path="$3" has_api="$4" domain front
+  domain="$(conf_get "$name" DOMAIN)"; front="$(conf_get "$name" FRONT)"
   for _ in $(seq 1 30); do
     if [[ "$has_api" == yes ]]; then
       curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:$port${path:-/}" && return 0
     else
-      curl -fsS -o /dev/null --max-time 3 -H "Host: $domain" http://127.0.0.1/ && return 0
+      curl -fsS -o /dev/null --max-time 3 -H "Host: $domain" "http://127.0.0.1:${front:-80}/" && return 0
     fi
     sleep 1
   done
@@ -273,6 +319,8 @@ cmd_create() {
   grep -rqx "DOMAIN=$domain" "$APPS"/*/app.conf 2>/dev/null && die "domain $domain is already used by another app"
   [[ -z "$port" ]] && port="$(next_port)"
   [[ "$port" =~ ^[0-9]{4,5}$ && "$port" -ge 1024 && "$port" -le 65000 ]] || die "bad port '$port'"
+  local front=""
+  [[ "$(edge)" == traefik ]] && front="$(next_front_port)"
   local e
   for e in ${exts//,/ }; do
     [[ " $EXTENSIONS " == *" $e "* ]] || die "extension '$e' not in the allowed list: $EXTENSIONS"
@@ -307,6 +355,7 @@ cmd_create() {
   chmod 600 "$envf"
   {
     echo "NAME=$name"; echo "DOMAIN=$domain"; echo "PORT=$port"; echo "DB=$db"; echo "CREATED=$(date -Is)"
+    if [[ -n "$front" ]]; then echo "FRONT=$front"; fi
   } > "$dir/app.conf"
   chown root:root "$dir/app.conf"
 
@@ -329,9 +378,10 @@ EOF
 
   mkdir -p "$NGINX_SNIPPETS"
   render_locations "$name" "$port" "" "" > "$NGINX_SNIPPETS/$name.conf"
-  render_site "$name" "$domain" > "/etc/nginx/sites-available/app-$name"
+  render_site "$name" "$domain" "$front" > "/etc/nginx/sites-available/app-$name"
   ln -sf "/etc/nginx/sites-available/app-$name" "/etc/nginx/sites-enabled/app-$name"
   reload_nginx || die "nginx config test failed; app created but not served yet"
+  write_edge "$name"
   cmd_tls "$name" || true
   say "done. In the project:"
   echo "  git remote add vps vps:$repo"
@@ -343,6 +393,23 @@ cmd_tls() {
   need_app "$name"
   domain="$(conf_get "$name" DOMAIN)"
   email="$(global EMAIL)"
+  if [[ "$(edge)" == traefik ]]; then  # Traefik issues the certificate on the first HTTPS request for the domain
+    write_edge "$name"
+    if ! dns_matches "$domain"; then
+      say "TLS: $domain doesn't point at this server yet. Add a DNS A record (or a wildcard), then: ssh vps tls $name"
+      return 1
+    fi
+    local tries
+    for tries in 1 2 3 4 5 6; do
+      : "attempt $tries"
+      if curl -fsS -o /dev/null --max-time 10 --resolve "$domain:443:127.0.0.1" "https://$domain/" 2>/dev/null; then
+        say "TLS: https://$domain is live"; return 0
+      fi
+      sleep 5
+    done
+    say "TLS: the certificate for $domain isn't issued yet (Traefik retries on its own; DNS may still be spreading). Check again: ssh vps tls $name"
+    return 1
+  fi
   if [[ -d "/etc/letsencrypt/live/$domain" ]]; then
     certbot renew --cert-name "$domain" --quiet || true
     say "TLS: certificate present for $domain"
@@ -472,11 +539,17 @@ cmd_status() {
   local name="$1"; need_app "$name"
   local domain port; domain="$(conf_get "$name" DOMAIN)"; port="$(conf_get "$name" PORT)"
   echo "app:      $name"
-  echo "domain:   https://$domain/  (TLS: $([[ -d /etc/letsencrypt/live/$domain ]] && echo yes || echo 'no - ssh vps tls '"$name"))"
+  local tls=no front; front="$(conf_get "$name" FRONT)"
+  if [[ "$(edge)" == traefik ]]; then
+    curl -fsS -o /dev/null --max-time 8 --resolve "$domain:443:127.0.0.1" "https://$domain/" 2>/dev/null && tls=yes
+  else
+    [[ -d "/etc/letsencrypt/live/$domain" ]] && tls=yes
+  fi
+  echo "domain:   https://$domain/  (TLS: $([[ $tls == yes ]] && echo yes || echo 'no - ssh vps tls '"$name"))"
   echo "service:  $(systemctl is-active "app-$name" 2>/dev/null || echo 'none (static site)') on port $port"
   echo "deployed: $(conf_get "$name" DEPLOYED)"
   echo "database: $(conf_get "$name" DB)"
-  echo "site:     HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: $domain" http://127.0.0.1/ || echo '-')"
+  echo "site:     HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: $domain" "http://127.0.0.1:${front:-80}/" || echo '-')"
 }
 
 cmd_logs() {
@@ -588,6 +661,7 @@ cmd_destroy() {
   systemctl disable --now "app-$name" 2>/dev/null || true
   rm -f "/etc/systemd/system/app-$name.service" "/etc/nginx/sites-enabled/app-$name" \
         "/etc/nginx/sites-available/app-$name" "$NGINX_SNIPPETS/$name.conf"
+  [[ -z "$(global TRAEFIK_DIR)" ]] || rm -f "$(global TRAEFIK_DIR)/vps-$name.yml"
   systemctl daemon-reload; reload_nginx || true
   if [[ "$dropdb" == yes ]]; then
     sudo -u postgres dropdb --if-exists "$(db_name_of "$name")"
@@ -607,6 +681,8 @@ main() {
     help|-h|--help) usage; return ;;
     version) echo "vps-agent $VERSION"; return ;;
     _render-locations) [[ -n "$TEST" ]] || die "test only"; render_locations "$@"; return ;;
+    _render-traefik) [[ -n "$TEST" ]] || die "test only"; render_traefik "$@"; return ;;
+    _render-site) [[ -n "$TEST" ]] || die "test only"; render_site "$@"; return ;;
   esac
   if [[ $EUID -ne 0 ]]; then
     [[ -n "$TEST" ]] && die "would need root for '$cmd'"

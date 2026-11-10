@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0 (2026-11-09)
+- **VPS kit works on servers that already run Traefik.** `bootstrap.sh` detects a Traefik container, reads its
+  config folder, certificate resolver and HTTPS entrypoint, and switches to Traefik mode: nginx only listens on
+  `127.0.0.1:<port>` behind it, certbot isn't installed, and each app gets one Traefik file
+  (`vps-<app>.yml`). Traefik issues the certificates. Servers without Traefik keep the nginx + certbot setup.
+  Force a mode with `--edge nginx|traefik`.
+- Fixed: cloning on Windows turned the kit's scripts into CRLF files, which failed on the server
+  (`invalid option name: set: pipefail`). `.gitattributes` now forces LF, and `setup_vps.sh` strips CRs before copying.
+- `ssh vps tls <app>` in Traefik mode checks DNS and waits for Traefik's certificate.
+- Tests for Traefik detection (using real Traefik settings), Traefik file rendering and the LF guard.
+
 ## 1.1.0 (2026-11-09)
 - **VPS kit** (`library/vps-kit/`): one-time `setup_vps.sh` creates a dedicated Claude key, installs `vps-agent`
   on the server and an `ssh vps` alias on your PC. The key is restricted to `vps-agent` (forced command): create,

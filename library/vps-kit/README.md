@@ -29,6 +29,11 @@ HTTPS certificates. Optional but recommended: a domain you control.
    `https://<app>.apps.yourdomain.com` with no DNS work at all.
 3. Done. Check with `ssh vps list`.
 
+**Servers that already run Traefik** (for example with other Docker apps): the setup detects it and uses it.
+Traefik keeps ports 80/443 and issues the HTTPS certificates; each app gets one small file in Traefik's config
+folder, and nginx only runs privately on `127.0.0.1`. Nothing else on the server is touched. No flags needed;
+force a mode with `--edge nginx` or `--edge traefik` on `bootstrap.sh` if detection ever picks wrong.
+
 Re-run the same command any time to update `vps-agent` after master-harness changes. It's additive: existing
 sites, databases and apps (FitTrack+ included) aren't touched.
 

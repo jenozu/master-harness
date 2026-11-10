@@ -1,0 +1,3 @@
+# The VPS kit's scripts run on Linux servers: keep LF line endings even when cloned on Windows.
+library/vps-kit/** text eol=lf
+*.sh text eol=lf

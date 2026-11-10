@@ -290,6 +290,75 @@ class VpsAgent(unittest.TestCase):
         bad = self.render({"web": {"dir": "x;rm", "out": "dist"}})
         self.assertIn("ERROR", bad)
 
+    def agent_cmd(self, *args, conf):
+        with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as f:
+            f.write(conf)
+        env = dict(os.environ, VPS_AGENT_TEST="1", VPS_AGENT_CONF=f.name)
+        r = subprocess.run(["bash", str(AGENT), *args], capture_output=True, text=True, env=env)
+        os.unlink(f.name)
+        return r.stdout + r.stderr
+
+    TRAEFIK_CONF = ("EDGE=traefik\nTRAEFIK_DIR=/docker/traefik/dynamic\nTRAEFIK_RESOLVER=letsencrypt\n"
+                    "TRAEFIK_ENTRYPOINT=websecure\n")
+
+    def test_traefik_mode_rendering(self):
+        site = self.agent_cmd("_render-site", "demo", "demo.example.com", "8500", conf=self.TRAEFIK_CONF)
+        self.assertIn("listen 127.0.0.1:8500;", site)
+        self.assertNotIn("listen 80", site)
+        self.assertNotIn("[::]", site)
+        tf = self.agent_cmd("_render-traefik", "demo", "demo.example.com", "8500", conf=self.TRAEFIK_CONF)
+        self.assertIn("rule: \"Host(`demo.example.com`)\"", tf)
+        self.assertIn("- websecure", tf)
+        self.assertIn("certResolver: letsencrypt", tf)
+        self.assertIn('url: "http://127.0.0.1:8500"', tf)
+        # behind Traefik the client's scheme/IP come from Traefik's headers, not from the local hop
+        cfg = {"api": {"runtime": "node", "start": "npm start"}}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+        loc = self.agent_cmd("_render-locations", "demo", "8101", f.name, "x", conf=self.TRAEFIK_CONF)
+        os.unlink(f.name)
+        self.assertIn("X-Forwarded-Proto https;", loc)
+        self.assertIn("X-Real-IP $http_x_real_ip;", loc)
+
+    def test_nginx_mode_still_listens_on_80(self):
+        site = self.agent_cmd("_render-site", "demo", "demo.example.com", conf="EDGE=nginx\n")
+        self.assertIn("listen 80;", site)
+
+    def test_bootstrap_detects_traefik(self):
+        if not shutil.which("jq"):
+            self.skipTest("jq not installed")
+        bootstrap = ROOT / "library/vps-kit/server/bootstrap.sh"
+        with tempfile.TemporaryDirectory() as t:
+            dyn = Path(t) / "dynamic"
+            dyn.mkdir()
+            insp = [{"Args": ["--providers.file.directory=/etc/traefik/dynamic", "--providers.docker=true",
+                              "--entrypoints.web.address=:80", "--entrypoints.websecure.address=:443",
+                              "--certificatesresolvers.letsencrypt.acme.httpchallenge=true",
+                              "--certificatesresolvers.letsencrypt.acme.email=a@b.c"],
+                     "Mounts": [{"Source": str(dyn), "Destination": "/etc/traefik/dynamic"},
+                                {"Source": "/var/run/docker.sock", "Destination": "/var/run/docker.sock"}]}]
+            (Path(t) / "insp.json").write_text(json.dumps(insp))
+            (Path(t) / "docker").write_text(
+                '#!/bin/sh\ncase "$1" in\n ps) echo "rf-scanner-api-1 rf-scanner-api"; echo "traefik-traefik-1 traefik:latest";;\n'
+                f' inspect) cat "{t}/insp.json";;\nesac\n')
+            (Path(t) / "docker").chmod(0o755)
+            (Path(t) / "k.pub").write_text("ssh-ed25519 AAAA test\n")
+            env = dict(os.environ, VPS_BOOTSTRAP_TEST="1", PATH=f"{t}:{os.environ['PATH']}")
+            args = ["bash", str(bootstrap), "--pubkey-file", str(Path(t) / "k.pub"), "--email", "a@b.c"]
+            out = subprocess.run(args, capture_output=True, text=True, env=env).stdout
+            self.assertIn("EDGE=traefik", out)
+            self.assertIn(f"TRAEFIK_DIR={dyn}", out)
+            self.assertIn("TRAEFIK_RESOLVER=letsencrypt", out)
+            self.assertIn("TRAEFIK_ENTRYPOINT=websecure", out)
+            # without docker/Traefik the classic nginx setup is kept
+            (Path(t) / "docker").write_text('#!/bin/sh\nexit 0\n')
+            out = subprocess.run(args, capture_output=True, text=True, env=env).stdout
+            self.assertIn("EDGE=nginx", out)
+
+    def test_kit_scripts_have_lf_line_endings(self):
+        for f in ("server/vps-agent", "server/bootstrap.sh", "setup_vps.sh"):
+            self.assertNotIn(b"\r", (ROOT / "library/vps-kit" / f).read_bytes(), f)
+
     @unittest.skipUnless(shutil.which("shellcheck"), "shellcheck not installed")
     def test_shellcheck(self):
         kit = ROOT / "library/vps-kit"
