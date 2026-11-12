@@ -35,10 +35,21 @@
 - Very long jobs (big downloads, data imports, hours-long builds): ask the human to run them in their own
   terminal and send back just the summary lines.
 
-## Git
-- Commit per task with the id: `task 7.2: <short title>`. Nothing a task created may stay untracked.
+## Git and delivery
+- Work on a branch, never directly on the default branch. Commit per task with the id: `task 7.2: <short title>`.
+  Nothing a task created may stay untracked.
 - Never commit generated junk (virtualenvs, node_modules, build output, caches, `.claude/tmp/`).
-- Push only when the human says so.
+- Push after every task commit. At the end of each phase, and before any stop, use the `deliver` skill: open a PR,
+  and **merge it automatically once checks pass**. Don't ask the human to merge or approve. Never merge red, never
+  force-push, never bypass checks.
+
+## Keep going, don't wait for approval
+- "Phase done, PR merged, shall I continue?" is never the right ending. Start the next phase right away.
+- If a human step exists but work can continue without it, **queue it and continue**: append it to
+  `.taskmaster/docs/human-checklist.md` as `- [ ] **Task <id>: <title>**: exact steps, where to run them, what to
+  send back`, build against placeholders/mocks/env vars, and log it on the task.
+- Stop only when the human is truly critical right now: nothing workable is left, the next step needs credentials
+  or an account that every remaining task depends on, money, a destructive action, or a goal/non-goal change.
 
 ## When stuck
 - Same error twice after a real fix attempt → stop and report; a stronger model is cheaper than a loop.

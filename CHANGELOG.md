@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.0 (2026-11-12)
+- **Auto-merge delivery.** New core skill `deliver`: push, open a PR, wait for CI, merge automatically when green
+  (squash), then continue from the updated default branch. Red CI is treated as a failed task and fixed through
+  the builder ladder; checks are never skipped. Protected branches use `gh pr merge --auto`, otherwise the merge
+  goes on the checklist and work continues on a branch cut from the PR branch. Branches are pushed after every
+  task commit; the PR happens at the end of each phase and before any stop.
+- **Keep going.** The lead now starts the next phase itself when one completes (no `/clear` and go-ahead
+  needed). Human-only steps no longer stop a phase: they're queued in the new
+  `.taskmaster/docs/human-checklist.md` (checkbox list) and later tasks build against placeholders. The harness
+  stops only when nothing workable is left, or for money, destructive actions and goal/non-goal changes.
+- Needs `gh` logged in, and push permission (use the `open` settings, or allow `git push origin *` yourself).
+- Project action: `--upgrade` replaces the owned files; the checklist file is created if missing.
+
 ## 1.3.1 (2026-11-09)
 - **Fixed a duplicate-builder bug.** A phase-runner could return PARTIAL while its builder was still running; the
   relaunched runner then started a second builder on the same working tree (about a quarter of one phase's

@@ -10,6 +10,7 @@ drifting away from the plan.
 - `.taskmaster/tasks/tasks.json`: phases, tasks, subtasks, status, dependencies, test strategy, work log. Source of truth.
 - `.taskmaster/docs/parking-lot.md`: ideas that are NOT in the plan.
 - `.taskmaster/docs/manual-checks.md`: checks waiting for a human or an agent with a running app.
+- `.taskmaster/docs/human-checklist.md`: steps only the human can do (queued, not blocking). Tick them when done.
 - `TASKS.md`: generated from tasks.json. Never edit by hand.
 
 Helper (Python stdlib only), from the repo root:
@@ -27,7 +28,7 @@ python .taskmaster/render_tasks_md.py                # refresh TASKS.md
 2. Read the code the task touches. Log your plan: `tasks.py log <id> "plan: files X, Y; approach ..."`.
 3. `tasks.py set-status <id> in-progress`, build it, log what worked and what failed.
 4. Run the task's testStrategy for real. Not done until it passes.
-5. Drift check, `set-status <id> done`, `render_tasks_md.py`, commit with the id: `task 7.2: <title>`.
+5. Drift check, `set-status <id> done`, `render_tasks_md.py`, commit with the id: `task 7.2: <title>`, push the branch.
 
 ## Drift rules
 - Only work on the task `next` returned. New ideas → dated line in `parking-lot.md`.

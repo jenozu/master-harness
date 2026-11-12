@@ -117,10 +117,13 @@ a task (build the table for the report).
 1. `rm -rf .harness-tmp` (it's gitignored, but remove it anyway).
 2. `git add -A && git commit -q -m "task 0: bootstrap agent harness (master-harness v<VERSION>)"`
 3. `python .claude/scripts/check_harness.py` (now including the git check) → 0 errors.
-4. Reply with only:
+4. Deliver with the `deliver` skill steps (push, PR titled `bootstrap: agent harness`, merge when checks pass).
+   Skip quietly if `gh` or a remote isn't available and list it under human steps.
+5. Reply with only:
    1. What was installed (core + which library pieces + any external skills, with URLs).
    2. Phases with task counts and one-line titles.
    3. Capability → task table.
    4. Assumptions you made, and open questions (also in memory.md).
    5. Human-only steps before or during the build.
-   6. How to start: `/clear`, then `/model opus`, then `/run-phase 0`.
+   6. How to start: `/clear`, then `/model opus`, then `/run-phase 0`. It runs phase after phase, merges PRs
+      itself and queues human-only steps in `.taskmaster/docs/human-checklist.md`.

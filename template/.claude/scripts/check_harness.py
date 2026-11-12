@@ -24,11 +24,12 @@ SKILL_FIELDS = {"name", "description", "when_to_use", "argument-hint", "argument
 RULE_FIELDS = {"paths", "description"}
 EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 CORE_AGENTS = ["phase-runner", "builder-haiku", "builder-sonnet", "builder-opus", "verifier", "reviewer"]
-CORE_SKILLS = ["run-phase", "next-task", "plan-from-prd", "adapt", "status", "manual-checks", "dev-servers"]
+CORE_SKILLS = ["run-phase", "next-task", "plan-from-prd", "adapt", "status", "manual-checks", "dev-servers", "deliver"]
 CORE_FILES = [".claude/scripts/check_harness.py", "CLAUDE.md", "AGENTS.md", ".claude/settings.json", ".claude/rules/rules.md", ".claude/rules/memory.md",
               ".claude/dev-servers.json", ".claude/scripts/devserver.py", ".claude/HARNESS_VERSION",
               ".taskmaster/tasks.py", ".taskmaster/render_tasks_md.py", ".taskmaster/tasks/tasks.json",
-              ".taskmaster/docs/prd.md", ".taskmaster/docs/parking-lot.md", ".taskmaster/docs/manual-checks.md"]
+              ".taskmaster/docs/prd.md", ".taskmaster/docs/parking-lot.md", ".taskmaster/docs/manual-checks.md",
+              ".taskmaster/docs/human-checklist.md"]
 LINE_CAPS = {"CLAUDE.md": 60, "AGENTS.md": 80, ".claude/rules/memory.md": 80}
 PLACEHOLDER = re.compile(r"\{\{[A-Z0-9_]+\}\}")
 SECRET = re.compile(r"(sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}"
