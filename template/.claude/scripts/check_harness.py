@@ -26,7 +26,7 @@ EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 CORE_AGENTS = ["phase-runner", "builder-haiku", "builder-sonnet", "builder-opus", "verifier", "reviewer"]
 CORE_SKILLS = ["run-phase", "next-task", "plan-from-prd", "adapt", "status", "manual-checks", "dev-servers", "deliver"]
 CORE_FILES = [".claude/scripts/check_harness.py", "CLAUDE.md", "AGENTS.md", ".claude/settings.json", ".claude/rules/rules.md", ".claude/rules/memory.md",
-              ".claude/dev-servers.json", ".claude/scripts/devserver.py", ".claude/HARNESS_VERSION",
+              ".claude/dev-servers.json", ".claude/scripts/devserver.py", ".claude/scripts/run-phases.py", ".claude/HARNESS_VERSION",
               ".taskmaster/tasks.py", ".taskmaster/render_tasks_md.py", ".taskmaster/tasks/tasks.json",
               ".taskmaster/docs/prd.md", ".taskmaster/docs/parking-lot.md", ".taskmaster/docs/manual-checks.md",
               ".taskmaster/docs/human-checklist.md"]

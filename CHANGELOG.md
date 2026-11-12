@@ -10,6 +10,9 @@
   needed). Human-only steps no longer stop a phase: they're queued in the new
   `.taskmaster/docs/human-checklist.md` (checkbox list) and later tasks build against placeholders. The harness
   stops only when nothing workable is left, or for money, destructive actions and goal/non-goal changes.
+- **Fresh context per phase.** `.claude/scripts/run-phases.py` runs `claude -p "/run-phase"` in a new process per
+  phase until nothing is left, workable or two runs in a row finish nothing. Inside a session, the lead hands over
+  after 3 phases: a one-shot scheduled task (fresh session) if it has a scheduler, else it asks you to `/clear`.
 - Needs `gh` logged in, and push permission (use the `open` settings, or allow `git push origin *` yourself).
 - Project action: `--upgrade` replaces the owned files; the checklist file is created if missing.
 

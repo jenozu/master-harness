@@ -19,7 +19,8 @@
 Escalation: haiku → sonnet → opus inside a task; phase-runner → lead when opus fails, scope changes, something is
 destructive, or nothing is workable without the human. Manual checks and human-only steps never stop a phase; they
 collect in `.taskmaster/docs/manual-checks.md` and `.taskmaster/docs/human-checklist.md`. Phases end with an
-auto-merged PR (`deliver`) and the lead starts the next phase without asking. Nesting is capped by
+auto-merged PR (`deliver`) and the lead starts the next phase without asking (fresh session per phase via
+`python .claude/scripts/run-phases.py`). Nesting is capped by
 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2`.
 
 ## Phases
