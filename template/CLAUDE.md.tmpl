@@ -17,8 +17,11 @@
 | reviewer | sonnet, read-only | Tasks flagged `review`, or diffs touching Risky paths |
 
 Escalation: haiku → sonnet → opus inside a task; phase-runner → lead when opus fails, scope changes, something is
-destructive, or a human-only step comes up. Manual checks never stop a phase; they collect in
-`.taskmaster/docs/manual-checks.md`. Nesting is capped by `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2`.
+destructive, or nothing is workable without the human. Manual checks and human-only steps never stop a phase; they
+collect in `.taskmaster/docs/manual-checks.md` and `.taskmaster/docs/human-checklist.md`. Phases end with an
+auto-merged PR (`deliver`) and the lead starts the next phase without asking; when its context passes ~150K
+it stops between phases and tells you to `/clear` and `/run-phase <next>`. Nesting is capped by
+`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2`.
 
 ## Phases
 {{PHASES}}
@@ -28,7 +31,7 @@ destructive, or a human-only step comes up. Manual checks never stop a phase; th
 
 ## Skills
 Core: `/run-phase [n|ids]` · `/status` · `/manual-checks run|results` · `/adapt` · `/plan-from-prd add-phase` ·
-`dev-servers` · `next-task` (phase-runner; `/next-task <id>` for one task by hand).
+`deliver` · `dev-servers` · `next-task` (phase-runner; `/next-task <id>` for one task by hand).
 Project: {{PROJECT_SKILLS}}
 
 ## Keeping cost down

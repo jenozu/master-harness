@@ -53,7 +53,9 @@ Ladder: **haiku → sonnet → opus**. Move one rung up when the builder reports
 reviewer says CHANGES NEEDED, or the builder hit maxTurns (partial output).
 - One rung per failure. Retry the same tier only for a mechanical failure (service not running, wrong test path):
   fix the environment and retry once.
-- BLOCKED for a missing decision, credential or human-only step → don't climb the ladder; escalate to the lead.
+- BLOCKED for a missing decision, credential or human-only step → don't climb the ladder. If the rest of the task can
+  be built against a placeholder, mock or env var, do that and queue the step in `human-checklist.md` (see the
+  phase-runner's rules). Otherwise leave the task pending, move to another task, and escalate only if nothing else is workable.
 - Log every rung: `python .taskmaster/tasks.py log <id> "escalate <from>→<to>: <one-line reason>"`.
 - Opus failed, or 2 escalations and still failing → stop this task and escalate to the lead (the phase-runner's
   rules say how). Run alone by a human, report to the human instead.
@@ -66,7 +68,8 @@ reviewer says CHANGES NEEDED, or the builder hit maxTurns (partial output).
 4. `python .taskmaster/tasks.py set-status <id> done && python .taskmaster/render_tasks_md.py`
 5. Stage the builder's FILES CHANGED plus `.taskmaster/` and `TASKS.md`, then `git status --short`: nothing the
    task created may stay untracked. `git commit -q -m "task <id>: <short title>"` (add your environment's
-   attribution lines if it asks for them). Don't push.
+   attribution lines if it asks for them), then `git push -q -u origin HEAD` as a backup. The PR and merge happen
+   at phase end through the `deliver` skill, not here.
 6. Keep a running tally for the end-of-phase report (tier, first try or escalated). Don't update memory.md per
    task; the phase-runner does it once at the end.
 7. No progress message. Go straight to the next task.
