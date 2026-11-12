@@ -18,17 +18,16 @@ while the phase-runner works, don't poll it, and don't relay its progress.
   fine. Wait for its completion notification and do nothing else meanwhile unless the human talks to you.
 
 ## 2. Read its one report and act
-- **COMPLETE** → the phase's PR is merged (or queued on the checklist). Send the human a 3-line note (tasks done,
-  PR merged, checklist items added), then hand over to a **fresh context**. Never wait for a go-ahead:
-  - `HARNESS_LOOP=1` is set (started by `.claude/scripts/run-phases.py`) → end your turn; the script starts the next
-    phase in a new session.
-  - Otherwise, fewer than 3 phases run in this session → launch the next phase right away in this session.
-  - 3 phases done in this session → write memory.md "Now" (phase-runner already did; add "resume with `/run-phase`"),
-    then start a fresh session instead of growing this one: if a scheduling tool is available, create a one-shot
-    scheduled task a few minutes out with the prompt `/run-phase`, and stop; otherwise tell the human to run
-    `/clear` then `/run-phase`, or `python .claude/scripts/run-phases.py` to do every remaining phase unattended.
-  Run `/manual-checks run` when agent-checkable items have piled up. No next phase → final summary: what shipped,
-  the checklist (`.taskmaster/docs/human-checklist.md`), manual checks left.
+- **COMPLETE** → the phase's PR is merged (or queued on the checklist). Then check the lead's own context, once:
+  `python .claude/scripts/context_check.py` (limit 150K, override with env `HARNESS_CONTEXT_LIMIT`).
+  - `STATUS=OK` (or UNKNOWN) → send the human a 3-line note (tasks done, PR merged, checklist items added) and
+    **launch the next phase immediately**. No go-ahead needed.
+  - `STATUS=OVER` → stop here, at the phase boundary, never mid-phase. Reply in at most 5 lines: what shipped,
+    "context is ~<n>K", and the exact next step: "Run `/clear`, then `/run-phase <next>` to continue with phase
+    <next> (<name>)." Make sure memory.md "Now" says the same.
+  The check only happens between phases, so a phase that is running always finishes, and the context can overshoot
+  the limit a little. Run `/manual-checks run` when agent-checkable items have piled up. No next phase → final
+  summary: what shipped, the checklist (`.taskmaster/docs/human-checklist.md`), manual checks left.
 - **PARTIAL** (turn limit) → first make sure no subagent from that run is still running (wait for its completion
   notification; two builders must never work in the same tree at once). Then relaunch a fresh phase-runner with
   the same prompt. No human message.

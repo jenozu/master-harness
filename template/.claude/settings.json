@@ -12,6 +12,8 @@
       "Bash(python .claude/scripts/devserver.py *)",
       "Bash(python3 .claude/scripts/devserver.py *)",
       "Bash(python .claude/scripts/check_harness.py*)",
+      "Bash(python .claude/scripts/context_check.py*)",
+      "Bash(python3 .claude/scripts/context_check.py*)",
       "Bash(python3 .claude/scripts/check_harness.py*)",
       "Bash(git status *)",
       "Bash(git diff *)",
