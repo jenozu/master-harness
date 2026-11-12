@@ -2,7 +2,7 @@
 
 ## 1.4.0 (2026-11-12)
 - **Auto-merge delivery.** New core skill `deliver`: push, open a PR, wait for CI, merge automatically when green
-  (squash), then continue from the updated default branch. Red CI is treated as a failed task and fixed through
+  (squash, through the REST API because GraphQL is blocked in Claude Code sessions), then continue from the updated default branch. Red CI is treated as a failed task and fixed through
   the builder ladder; checks are never skipped. Protected branches use `gh pr merge --auto`, otherwise the merge
   goes on the checklist and work continues on a branch cut from the PR branch. Branches are pushed after every
   task commit; the PR happens at the end of each phase and before any stop.
