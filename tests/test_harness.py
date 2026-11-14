@@ -241,6 +241,165 @@ class TasksPy(unittest.TestCase):
         self.assertIn("**[HUMAN]**", md)
 
 
+class ScriptChecks(unittest.TestCase):
+    """run_checks.py: free checks for runner: script tasks, no model."""
+
+    def setUp(self):
+        self.p = Project()
+        d = self.p.dir
+        (d / "checks").mkdir()
+        (d / "checks/ok.py").write_text("print('all good')\n")
+        (d / "checks/bad.py").write_text("import sys\nfor i in range(30): print('line', i)\nsys.exit(3)\n")
+        (d / "frontend/mark.py").write_text("open('ran.txt', 'w').write('x')\n")
+        self.exe = Path(PY).name.lower()
+        for ext in (".exe", ".cmd", ".bat"):
+            if self.exe.endswith(ext):
+                self.exe = self.exe[: -len(ext)]
+        cj = d / ".taskmaster/checks.json"
+        cfg = json.loads(cj.read_text())
+        cfg["allow"].append(self.exe)
+        cj.write_text(json.dumps(cfg))
+
+    def tearDown(self):
+        self.p.cleanup()
+
+    def edit(self, fn):
+        tj = self.p.dir / ".taskmaster/tasks/tasks.json"
+        data = json.loads(tj.read_text())
+        fn(data["master"]["tasks"])
+        tj.write_text(json.dumps(data))
+
+    def add_script(self, tasks, tid, phase, deps, *cmds, status="pending"):
+        tasks.append({"id": tid, "title": f"Gate {tid}", "status": status, "priority": "medium", "phase": phase,
+                      "complexity": 2, "dependencies": deps, "runner": "script", "check": list(cmds),
+                      "testStrategy": f"python .taskmaster/run_checks.py run --only {tid}", "subtasks": []})
+
+    def checks(self, *args):
+        return run([PY, ".taskmaster/run_checks.py", *args], self.p.dir, check=False)
+
+    def status(self, tid):
+        data = json.loads((self.p.dir / ".taskmaster/tasks/tasks.json").read_text())["master"]["tasks"]
+        return next(t for t in data if t["id"] == tid)
+
+    def test_validate_rejects_unknown_runner_and_missing_check(self):
+        def f(t):
+            t[0]["runner"] = "kernel"
+            t[1]["runner"] = "script"
+        self.edit(f)
+        out = self.p.tasks("validate", check=False).stdout
+        self.assertIn("runner 'kernel' must be one of", out)
+        self.assertIn("2: runner is script but there is no check", out)
+
+    def test_validate_rejects_shell_operators_strings_shells_and_inline_code(self):
+        self.edit(lambda t: (self.add_script(t, 6, 0, [], ["pytest", "&&", "ruff"]),
+                             self.add_script(t, 7, 0, [], "cd frontend && npm run build"),
+                             self.add_script(t, 8, 0, [], ["bash", "-c", "pytest"]),
+                             self.add_script(t, 9, 0, [], ["python", "-c", "print(1)"]),
+                             self.add_script(t, 10, 0, [], {"cmd": ["pytest"], "cwd": "../elsewhere"})))
+        out = self.p.tasks("validate", check=False).stdout
+        self.assertIn("6: check: shell operator", out)
+        self.assertIn("7: check: 'cd frontend && npm run build' is a string", out)
+        self.assertIn("8: check: 'bash' is a shell", out)
+        self.assertIn("9: check: inline code", out)
+        self.assertIn("10: check: cwd '../elsewhere'", out)
+
+    def test_plan_lists_open_script_tasks_in_dependency_order(self):
+        def f(t):
+            self.add_script(t, 6, 1, [], [PY, "checks/ok.py"])
+            self.add_script(t, 7, 0, [], [PY, "checks/ok.py"], status="done")
+            self.add_script(t, 8, 0, [1], [PY, "checks/ok.py"])
+        self.edit(f)
+        r = self.checks("plan")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        lines = [ln for ln in r.stdout.splitlines() if not ln.startswith("  ")]
+        self.assertEqual([ln.split()[0] for ln in lines], ["6", "8"], r.stdout)  # 7 done; 1-5 are agent tasks
+        self.assertIn("8 Gate 8  [waiting on 1]", r.stdout)
+        self.assertIn("6 Gate 6  [ready]", r.stdout)
+        self.assertEqual(self.checks("plan", "--phase", "0").stdout.split()[0], "8")
+
+    def test_run_marks_done_only_after_pass(self):
+        self.edit(lambda t: self.add_script(t, 6, 0, [], [PY, "checks/ok.py"],
+                                            {"cmd": [PY, "mark.py"], "cwd": "frontend"}))
+        r = self.checks("run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("PASS task 6", r.stdout)
+        t = self.status(6)
+        self.assertEqual(t["status"], "done")
+        self.assertIn("script check passed: 2 command(s)", t["details"])
+        self.assertTrue((self.p.dir / "frontend/ran.txt").exists(), "cwd is honoured")
+        log = (self.p.dir / ".claude/tmp/checks/6.log").read_text()
+        self.assertIn("stdout sha256", log)
+        self.assertIn("result: PASS", log)
+
+    def test_run_stops_at_first_failure_and_leaves_status(self):
+        def f(t):
+            self.add_script(t, 6, 0, [], [PY, "checks/bad.py"], [PY, "checks/ok.py"])
+            self.add_script(t, 7, 0, [6], [PY, "checks/ok.py"])
+        self.edit(f)
+        r = self.checks("run")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("FAIL task 6", r.stdout)
+        self.assertIn("exit 3, expected 0", r.stdout)
+        self.assertIn("line 29", r.stdout)
+        self.assertNotIn("line 9\n", r.stdout, "only the last 20 lines are printed")
+        self.assertEqual(self.status(6)["status"], "pending")
+        self.assertIn("script check FAILED", self.status(6)["details"])
+        self.assertEqual(self.status(7)["status"], "pending")
+        self.assertNotIn("PASS", r.stdout)
+
+    def test_expected_exit_code(self):
+        self.edit(lambda t: self.add_script(t, 6, 0, [], {"cmd": [PY, "checks/bad.py"], "expect": 3}))
+        self.assertEqual(self.checks("run", "--only", "6").returncode, 0)
+        self.assertEqual(self.status(6)["status"], "done")
+
+    def test_commands_off_the_allowlist_are_refused(self):
+        self.edit(lambda t: self.add_script(t, 6, 0, [], ["git", "push", "origin", "main"]))
+        r = self.checks("run", "--only", "6")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not on the allowlist", r.stdout)
+        self.assertEqual(self.status(6)["status"], "pending")
+        self.assertIn("REFUSED", self.checks("plan").stdout)
+        self.assertIn("script task check refused", self.p.check("--no-git").stdout)
+
+    def test_shell_operator_refused_at_run_time_too(self):
+        self.edit(lambda t: self.add_script(t, 6, 0, [], [PY, "checks/ok.py", ";", "rm", "-rf", "x"]))
+        r = self.checks("run", "--only", "6")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("shell operator", r.stdout)
+
+    def test_only_refuses_agent_tasks_and_waiting_tasks(self):
+        self.edit(lambda t: self.add_script(t, 6, 0, [1], [PY, "checks/ok.py"]))
+        self.assertEqual(self.checks("run", "--only", "1").returncode, 2)
+        r = self.checks("run", "--only", "6")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("waiting on 1", r.stdout)
+        self.assertIn("skipped: 6 (waiting on 1)", self.checks("run").stdout)
+
+    def test_tasks_py_shows_script_tasks_and_add(self):
+        self.p.tasks("add", "--title", "Phase 0 gate", "--phase", "0", "--runner", "script",
+                     "--check", "ruff check .", "--check", "pytest -q")
+        t = self.status(6)
+        self.assertEqual(t["check"], [["ruff", "check", "."], ["pytest", "-q"]])
+        self.assertEqual(t["testStrategy"], "python .taskmaster/run_checks.py run --only 6")
+        self.assertIn("ok", self.p.tasks("validate").stdout)
+        self.assertIn("runner: script", self.p.tasks("show", "6").stdout)
+        self.assertIn("[SCRIPT]", self.p.tasks("phase", "0").stdout)
+        self.p.tasks("set-status", "1", "done")
+        self.assertIn("SCRIPT TASK", self.p.tasks("next", "--phase", "0").stdout)
+
+    def test_no_bytecode_left_behind(self):
+        self.checks("plan")
+        self.assertFalse((self.p.dir / ".taskmaster/__pycache__").exists())
+
+    def test_run_path_uses_stdlib_only(self):
+        import ast
+        src = (ROOT / "template/.taskmaster/run_checks.py").read_text(encoding="utf-8")
+        mods = {n.names[0].name.split(".")[0] for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Import)}
+        mods |= {n.module.split(".")[0] for n in ast.walk(ast.parse(src)) if isinstance(n, ast.ImportFrom)}
+        self.assertLessEqual(mods, {"argparse", "datetime", "hashlib", "json", "os", "shutil", "subprocess",
+                                    "sys", "time", "pathlib", "tasks"})
+
+
 class DevServer(unittest.TestCase):
     def test_start_status_stop(self):
         p = Project(rules="", skills="", settings="")

@@ -9,6 +9,8 @@
       "Bash(python3 .taskmaster/tasks.py *)",
       "Bash(python .taskmaster/render_tasks_md.py)",
       "Bash(python3 .taskmaster/render_tasks_md.py)",
+      "Bash(python .taskmaster/run_checks.py *)",
+      "Bash(python3 .taskmaster/run_checks.py *)",
       "Bash(python .claude/scripts/devserver.py *)",
       "Bash(python3 .claude/scripts/devserver.py *)",
       "Bash(python .claude/scripts/check_harness.py*)",

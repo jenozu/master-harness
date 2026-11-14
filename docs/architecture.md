@@ -21,11 +21,18 @@ human ── /run-phase N ──▶ lead (main session, Opus)
 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` allows exactly lead → phase-runner → builders. Builders, the verifier and
 the reviewer have `Agent` disallowed.
 
+## Free checks
+Tasks tagged `runner: script` (each phase's gate task, plus anything else that is only commands: lint, types,
+tests, build, CI status) skip the ladder entirely. The phase-runner runs `python .taskmaster/run_checks.py run
+--only <id>`; no builder, no verifier, zero tokens. Only a failure goes to a builder, with the output tail.
+Commands must match the allowlist in `.taskmaster/checks.json` (seeded, project-owned) and never go through a shell.
+
 ## Why it's cheap
 - **The lead does almost nothing.** Its context grows by one report per phase. It's on Opus because its rare
   decisions (escalations, scope) are the hard ones.
 - **Routing by complexity.** Each task has a 1-10 score from planning: 1-3 starts on Haiku, 4-6 on Sonnet, 7+ on
   Opus (split into subtasks first). Most work lands on Haiku and Sonnet.
+- **Free checks.** Script tasks run without any model; tokens are spent only when one fails.
 - **Escalate, don't loop.** A builder that fails the same way twice stops. One rung up costs less than ten retries.
 - **Fresh contexts.** Each builder starts clean with just a task id. The phase-runner doesn't read source files,
   only builder reports and `tasks.py` output.
@@ -56,6 +63,6 @@ tier escalated 3 times in a row, or files missing from git at the start. Manual 
 
 ## Owned vs seeded files
 - **Owned** (replaced by upgrades; keep project specifics out of them): core agents, core skills, `rules.md`,
-  `tasks.py`, `render_tasks_md.py`, `.claude/scripts/*`, `prd-template.md`.
+  `tasks.py`, `render_tasks_md.py`, `run_checks.py`, `.claude/scripts/*`, `prd-template.md`.
 - **Seeded** (created once, then the project's): CLAUDE.md, AGENTS.md, memory.md, settings.json,
-  dev-servers.json, tasks.json, parking-lot.md, manual-checks.md, and any library or project rules and skills.
+  dev-servers.json, tasks.json, checks.json, parking-lot.md, manual-checks.md, and any library or project rules and skills.

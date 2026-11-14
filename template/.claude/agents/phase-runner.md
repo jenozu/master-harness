@@ -40,10 +40,12 @@ Repeat until every task in the phase is `done`, `cancelled` or `deferred`:
      placeholders, mocks or env vars. Say so in their logs.
    - Later tasks can't be built or tested without it (a decision that changes what to build) → leave it pending,
      work on everything else, and only if nothing workable is left finish with HUMAN NEEDED.
-3. Otherwise run the task with the **next-task procedure** (preloaded): route to builder-haiku/sonnet/opus,
+3. A **script task** (`tasks.py next` prints `SCRIPT TASK`): no builder, no verifier, no tokens. Run
+   `python .taskmaster/run_checks.py run --only <id>` and act on the exit code as next-task section 1b says.
+4. Otherwise run the task with the **next-task procedure** (preloaded): route to builder-haiku/sonnet/opus,
    verify, review if risky, escalate between builders, close out, commit.
-4. Keep your own context small: don't open source files yourself. Use the builders' reports and `tasks.py show`.
-5. **Wait for every subagent you start.** Agent calls run in the background: after each one, wait for its
+5. Keep your own context small: don't open source files yourself. Use the builders' reports and `tasks.py show`.
+6. **Wait for every subagent you start.** Agent calls run in the background: after each one, wait for its
    completion notification before the next step. Never return (PARTIAL or anything else) while a subagent you
    started is still running, and never start a second builder on a task whose builder hasn't reported.
 
@@ -85,7 +87,7 @@ Close to maxTurns: wait for any running subagent, finish the current task's clos
 ```
 PHASE STATUS: COMPLETE | PARTIAL | ESCALATE | HUMAN NEEDED
 PHASE: <n>   DONE THIS RUN: <ids>   REMAINING: <ids or none>
-ROUTING: haiku <first-try>/<escalated>, sonnet <n>/<n>, opus <n>/<n>
+ROUTING: script <passed>/<failed>, haiku <first-try>/<escalated>, sonnet <n>/<n>, opus <n>/<n>
 MANUAL CHECKS WAITING: <agent-checkable n, eyes-on n>   HUMAN CHECKLIST: <open items n>
 PR: <#number merged | auto-merge set | on checklist | none>
 ISSUE (if not COMPLETE): task <id> - <what's wrong, 2-4 lines>

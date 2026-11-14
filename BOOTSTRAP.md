@@ -86,6 +86,9 @@ re-running won't overwrite files it already created). "kept existing" files: mer
   under 2 KB, only rules a model would get wrong without being told).
 - Library skills: fill their `{{...}}` values and paths; delete sections for tools this project doesn't use
   (e.g. the other migration tools in `db-migration`).
+- `.taskmaster/checks.json` (allowlist for free checks): keep only entries this stack uses and add any check-only
+  tool it needs (e.g. `"alembic check"`, `"npx playwright test"`). Never add something that can send, publish,
+  delete, install or spend (`git push`, `gh pr merge`, `npm publish`, `curl`, `ssh`).
 - `CLAUDE.md` stays under 60 lines, `AGENTS.md` under 80, `memory.md` under 80.
 
 ## 8. External skills (optional, at most 5)
@@ -101,7 +104,7 @@ If nothing clearly beats a short skill you can write yourself, write it yourself
 ## 9. Plan
 Follow `.claude/skills/plan-from-prd/SKILL.md` in `new` mode (read the file; you run it, it's not auto-invoked):
 phases in `metadata.phases`, tasks with phase, complexity, runnable testStrategy, `human`/`review` flags, subtasks
-for 7+. Phase 0 includes cleaning up anything committed that shouldn't be (step 2). Then fill `{{PHASES}}` in
+for 7+, and a free script gate task at the end of each phase. Phase 0 includes cleaning up anything committed that shouldn't be (step 2). Then fill `{{PHASES}}` in
 CLAUDE.md if it was left for now, and `python .taskmaster/render_tasks_md.py`.
 
 ## 10. Check

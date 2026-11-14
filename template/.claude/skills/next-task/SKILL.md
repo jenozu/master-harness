@@ -14,6 +14,23 @@ Task id: `$ARGUMENTS` if given, else `python .taskmaster/tasks.py next`.
 `python .taskmaster/tasks.py show <id>`: description, phase, complexity, flags, testStrategy, the end of the log.
 Don't open source files. Flag `human` → not a builder task; see the phase-runner's rules.
 
+## 1b. Script tasks (free checks)
+`show` prints `runner: script` → the task is only commands that need no judgment (lint, type check, tests, build,
+CI status). Don't dispatch a builder or the verifier. Run `python .taskmaster/run_checks.py run --only <id>`:
+- **exit 0** → it already logged and marked the task done. Do close-out steps 4-5 only (render, commit
+  `task <id>: <title> (script check)`), then go on.
+- **exit 1** → a check failed and the status is unchanged; the command and its last lines were printed, the full
+  record is in `.claude/tmp/checks/<id>.log`. The code needs fixing: route by complexity (section 3) with
+  `Task <id>: its script check failed. Read .claude/tmp/checks/<id>.log and fix the cause. Don't edit
+  .taskmaster/, and don't weaken, skip or delete a test, lint rule or check. Run the failing command yourself to
+  confirm, then reply in your STATUS format.` After DONE: verifier with `Verify task <id>: the fix for its failed
+  script check; no test, rule or check may be weakened.` On PASS run `run_checks.py run --only <id>` again; exit 0
+  closes it, exit 1 is a failure for the ladder (section 5).
+- **exit 2** → refused or not runnable (command not on the allowlist in `.taskmaster/checks.json`, a shell
+  operator, waiting on a dependency). That's a plan problem, not a code problem: fix the task's `check` (or add a
+  check-only tool to the allowlist) and log why; anything that would let it send, publish, delete or spend is an
+  escalation to the lead. Never route exit 2 to a builder.
+
 ## 2. Split big tasks first
 Complexity ≥ 7 with no subtasks: dispatch **builder-opus** with "Split task <id> into subtasks; do not build."
 Then run each subtask through this procedure. The parent is done when all subtasks are done and its own
