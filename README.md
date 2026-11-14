@@ -6,6 +6,8 @@ A reusable Claude Code setup that turns a PRD into a project Claude can build ph
 - **phase-runner** (Sonnet) runs a whole phase with no check-ins, then sends one short report.
 - **Builders** (Haiku → Sonnet → Opus) take each task at the cheapest model that can do it, and escalate up the
   ladder when they fail. A **verifier** (Haiku) and **reviewer** (Sonnet) check the work.
+- **Free checks:** tasks that are only commands (lint, tests, build, each phase's final gate) run from a plain
+  script with no model at all. A model is called only when one fails.
 - A **Taskmaster plan** in git (`.taskmaster/`) holds the phases, tasks, and work log, plus a small
   **memory.md**, so any session on any device picks up where the last one stopped.
 

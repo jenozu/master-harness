@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.5.0 (2026-11-14)
+- **Free checks.** Tasks can be tagged `"runner": "script"` with a `"check"` list of commands. The new
+  `.taskmaster/run_checks.py` runs them with no model: no builder, no verifier, zero tokens. A model is only
+  called when a check fails, and then gets the command and the last 20 lines of output.
+  - `run_checks.py plan` lists open script tasks in dependency order; `run [--only id | --from id]` runs them,
+    marks a task done only after every command passes, and stops at the first failure with the status unchanged.
+  - Safety: commands are argument lists run without a shell; shell operators, shells, `python -c` and folders
+    outside the repo are refused; every command must match the allowlist in the new `.taskmaster/checks.json`
+    (seeded, so each project keeps its own). Retries only on a timeout, never on a failed check. Each run is
+    recorded in `.claude/tmp/checks/<id>.log` (times, exit codes, stdout sha256, output tails).
+  - `tasks.py validate` checks the new fields; `show`/`next`/`phase` mark script tasks; `add --runner script
+    --check "..."`. `check_harness.py` reports commands the allowlist would refuse.
+  - `plan-from-prd` ends every phase with a free **gate task** (lint, types, tests, build) and tags other
+    check-only tasks as script tasks. The phase-runner and next-task run them before any builder.
+- Project action (upgrade): `--upgrade` adds `run_checks.py`, `checks.json` and the new permissions. Then
+  (1) trim `.taskmaster/checks.json` `allow` to this project's tools and add any check-only tool it needs;
+  (2) for each phase that isn't done, add a gate task with
+  `python .taskmaster/tasks.py add --title "Phase <n> gate: lint, types, tests and build pass" --phase <n>
+  --complexity 3 --deps <every other task in the phase> --runner script --check "<lint cmd>" --check "<test cmd>" ...`
+  (commands from AGENTS.md; a command that needs a folder gets `{"cmd": [...], "cwd": "<dir>"}` in tasks.json);
+  (3) `python .taskmaster/run_checks.py plan` shows nothing REFUSED, then `tasks.py validate` and
+  `render_tasks_md.py`. Existing tasks keep working unchanged.
+
 ## 1.4.0 (2026-11-12)
 - **Auto-merge delivery.** New core skill `deliver`: push, open a PR, wait for CI, merge automatically when green
   (squash, through the REST API because GraphQL is blocked in Claude Code sessions), then continue from the updated default branch. Red CI is treated as a failed task and fixed through

@@ -46,10 +46,25 @@ then run `validate`). Every task needs:
   what to paste back). Keep these as separate small tasks so agent work isn't blocked behind them.
 - `review: true` for auth, permissions, migrations that change existing data, server scripts, payments, deletion.
 
+**Free checks (`runner: script`).** A task whose whole job is running commands that need no judgment is a script
+task: `run_checks.py` runs it with no model, so it costs nothing. Tag it only if all of these hold: the same
+input always gives the same result, commands prove it (exit code 0 = pass), nothing has to be written, read or
+decided, and nothing is sent, published, deleted or paid for. Everything else stays a normal task. Fields:
+`"runner": "script"`, `"check"`: a list of commands, each an argument list (`["npm", "run", "build"]`) or
+`{"cmd": [...], "cwd": "frontend"}`; never a shell string, `cd`, `&&` or pipes. testStrategy:
+`python .taskmaster/run_checks.py run --only <id>`. Every command must start with an entry in
+`.taskmaster/checks.json` `allow`.
+- **End every phase with a gate task**: "Phase <n> gate: lint, types, tests and build pass", `runner: script`,
+  complexity 3, depending on every other task in the phase, `check` = the project's lint, type-check, test and
+  build commands (the ones in AGENTS.md, split into argument lists). It catches what per-task checks missed before
+  the PR, for free.
+- Other typical script tasks: a migration status check, a smoke script, `gh pr checks <n>`.
+
 Tasks scored 7+ get 3-5 subtasks (`tasks.py add --parent <id> ...`), each with its own test and complexity.
 
 ## 4. Check
 1. `python .taskmaster/tasks.py validate` → no errors. Fix every warning you can.
+   `python .taskmaster/run_checks.py plan` → nothing REFUSED (fix the check or the allowlist).
 2. Coverage: every PRD capability maps to at least one task; every task traces to the PRD. Tasks that trace to
    nothing are scope creep: cut them or park them in `parking-lot.md`.
 3. `python .taskmaster/tasks.py phase` shows sensible phases; `tasks.py next` returns task 1 (or the first new
@@ -57,5 +72,5 @@ Tasks scored 7+ get 3-5 subtasks (`tasks.py add --parent <id> ...`), each with i
 4. `python .taskmaster/render_tasks_md.py`.
 5. Update the "Phases" line in CLAUDE.md if it lists phases.
 
-Report: phases with task counts, the capability → task table, the human-only tasks, and anything in the PRD you
+Report: phases with task counts (and how many are free script tasks), the capability → task table, the human-only tasks, and anything in the PRD you
 couldn't plan because it's ambiguous (as questions).

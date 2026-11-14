@@ -7,11 +7,13 @@ Commands: init, status, phase, list, next, show, set-status, log, add, validate
 IDs are "3" for a task and "3.2" for subtask 2 of task 3.
 Phases live in metadata.phases ([{"id": 0, "name": "Foundation"}, ...]); each top-level task has "phase".
 Optional task flags: "human": true (only the human can do it), "review": true (reviewer agent after verifier).
+Script tasks: "runner": "script" plus "check" (a list of commands) are run by run_checks.py with no model at all.
 """
 import argparse
 import datetime
 import json
 import os
+import shlex
 import sys
 
 DEFAULT_FILE = ".taskmaster/tasks/tasks.json"
@@ -19,6 +21,13 @@ STATUSES = ["pending", "in-progress", "review", "done", "deferred", "cancelled"]
 PRIORITY = {"high": 3, "medium": 2, "low": 1}
 ICON = {"pending": "[ ]", "in-progress": "[~]", "review": "[?]", "done": "[x]",
         "deferred": "[-]", "cancelled": "[/]"}
+RUNNERS = ("agent", "script")
+# A check command is an argv list, never a shell string. These can't appear in one.
+SHELL_TOKENS = {"&&", "||", "|", ";", "&", ">", ">>", "<", "2>", "2>&1", "1>"}
+SHELL_CHARS = ("`", "$(", "\n")
+SHELLS = {"sh", "bash", "zsh", "dash", "fish", "cmd", "powershell", "pwsh", "cd", "env", "xargs", "sudo"}
+INLINE_CODE = {"python": {"-c"}, "python3": {"-c"}, "py": {"-c"}, "node": {"-e", "--eval", "-p", "--print"},
+               "bun": {"-e", "--eval", "-p", "--print"}, "deno": {"eval"}}
 
 
 def die(msg, code=2):
@@ -100,6 +109,65 @@ def norm_dep(dep, parent):
 
 def status_of(item):
     return (item.get("status") or "pending").lower()
+
+
+def runner_of(item, parent=None):
+    return item.get("runner") or (parent or {}).get("runner") or "agent"
+
+
+def exe_name(arg):
+    """Executable name without folder or Windows extension, lower case: 'C:/x/NPM.cmd' -> 'npm'."""
+    base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    for ext in (".exe", ".cmd", ".bat", ".ps1"):
+        if base.endswith(ext):
+            return base[: -len(ext)]
+    return base
+
+
+def norm_check(entry):
+    """One check entry -> (argv, cwd, problem). Entry: ["pytest", "-q"] or {"cmd": [...], "cwd": "frontend"}."""
+    cwd = "."
+    if isinstance(entry, dict):
+        cwd = entry.get("cwd") or "."
+        entry = entry.get("cmd")
+    if isinstance(entry, str):
+        try:
+            hint = f", e.g. {shlex.split(entry)}"
+        except ValueError:
+            hint = ""
+        return None, cwd, f"'{entry}' is a string; write it as a list of arguments{hint}"
+    if not isinstance(entry, list) or not entry or not all(isinstance(x, str) and x for x in entry):
+        return None, cwd, "a command must be a non-empty list of non-empty strings"
+    if not isinstance(cwd, str) or os.path.isabs(cwd) or cwd.replace("\\", "/").startswith("/") \
+            or ":" in cwd or ".." in cwd.replace("\\", "/").split("/"):
+        return entry, cwd, f"cwd '{cwd}' must be a folder inside the repo (relative, no '..')"
+    if exe_name(entry[0]) in SHELLS:
+        return entry, cwd, f"'{entry[0]}' is a shell or wrapper; run the program directly instead"
+    if set(entry[1:]) & INLINE_CODE.get(exe_name(entry[0]), set()):
+        return entry, cwd, f"inline code in {entry}; put it in a script file in the repo and run that"
+    for x in entry:
+        if x in SHELL_TOKENS or any(c in x for c in SHELL_CHARS):
+            return entry, cwd, f"shell operator in {entry}; split it into separate commands (use cwd instead of cd)"
+    return entry, cwd, None
+
+
+def check_problems(item, fid):
+    out = []
+    r = item.get("runner")
+    if r is not None and r not in RUNNERS:
+        out.append(f"{fid}: runner '{r}' must be one of {', '.join(RUNNERS)}")
+    chk = item.get("check")
+    if r == "script" and status_of(item) not in ("cancelled", "deferred", "done") and not chk:
+        out.append(f"{fid}: runner is script but there is no check (the commands the script runs)")
+    if chk is not None:
+        if not isinstance(chk, list):
+            out.append(f"{fid}: check must be a list of commands")
+        else:
+            for c in chk:
+                _, _, prob = norm_check(c)
+                if prob:
+                    out.append(f"{fid}: check: {prob}")
+    return out
 
 
 def done_ids(tasks):
@@ -244,6 +312,7 @@ def validate(tasks, meta=None):
                     errors.append(f"{fid}: depends on itself")
                 elif parent is None and "." not in d and int(d) > t["id"]:
                     errors.append(f"{fid}: depends on later task {d} (tasks may depend only on lower ids)")
+            errors.extend(check_problems(item, fid))
             if not item.get("testStrategy") and st not in ("cancelled", "deferred"):
                 warns.append(f"{fid}: no testStrategy")
             if st in ("pending", "in-progress"):
@@ -293,6 +362,8 @@ def line(item, parent=None, indent=""):
         extra += f" c{item['complexity']}"
     if item.get("human"):
         extra += " [HUMAN]"
+    if item.get("runner") == "script":
+        extra += " [SCRIPT]"
     return f"{indent}{ICON.get(status_of(item), '[ ]')} {fid} {item.get('title', '')}{extra}"
 
 
@@ -410,6 +481,8 @@ def cmd_next(a):
         print(f"  note: complexity {item['complexity']} with no subtasks. Expand before starting.")
     if item.get("human") or (parent or {}).get("human"):
         print("  HUMAN STEP: only the human can do this. Escalate as HUMAN NEEDED with exact instructions.")
+    elif runner_of(item, parent) == "script":
+        print(f"  SCRIPT TASK: no builder. Run: python .taskmaster/run_checks.py run --only {full_id(item, parent)}")
     print(f"  show details: tasks.py show {full_id(item, parent)}")
 
 
@@ -428,6 +501,11 @@ def cmd_show(a):
     flags = [f for f in ("human", "review") if item.get(f) or top.get(f)]
     if flags:
         print("flags: " + ", ".join(flags))
+    if runner_of(item, parent) == "script":
+        print("runner: script (python .taskmaster/run_checks.py run --only " + full_id(item, parent) + ")")
+        for c in item.get("check") or []:
+            argv, cwd, _ = norm_check(c)
+            print("  check: " + " ".join(argv or [str(c)]) + (f"   (in {cwd})" if cwd != "." else ""))
     if item.get("description"):
         print(f"description: {item['description']}")
     deps = deps_of(item, parent)
@@ -515,6 +593,12 @@ def cmd_add(a):
         new["human"] = True
     if a.review:
         new["review"] = True
+    if a.runner:
+        new["runner"] = a.runner
+    if a.check:
+        new["check"] = [shlex.split(c) for c in a.check]
+        if not a.test:
+            new["testStrategy"] = "python .taskmaster/run_checks.py run --only <this id>"
     if a.parent is None:
         if a.phase is not None:
             new["phase"] = a.phase
@@ -537,6 +621,8 @@ def cmd_add(a):
         new["subtasks"] = []
         tasks.append(new)
         fid = str(new["id"])
+    if new["testStrategy"].endswith("<this id>"):
+        new["testStrategy"] = new["testStrategy"].replace("<this id>", fid)
     errors, _ = validate(tasks, meta_of(data, a.tag))
     if errors:
         print("warning: the new item introduces problems:")
@@ -604,6 +690,9 @@ def main():
     sp.add_argument("--phase", type=int, help="top-level only; defaults to the latest phase of its deps")
     sp.add_argument("--human", action="store_true", help="only the human can do this task")
     sp.add_argument("--review", action="store_true", help="reviewer agent must approve after the verifier")
+    sp.add_argument("--runner", choices=list(RUNNERS), help="script = run_checks.py runs it, no model")
+    sp.add_argument("--check", action="append", help="a command the script runs, e.g. \"ruff check .\" "
+                    "(repeatable; no shell operators; for a cwd, edit tasks.json: {\"cmd\": [...], \"cwd\": \"dir\"})")
     sp.set_defaults(fn=cmd_add)
     sub.add_parser("validate").set_defaults(fn=cmd_validate)
 

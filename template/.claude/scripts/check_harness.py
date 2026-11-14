@@ -29,7 +29,7 @@ CORE_FILES = [".claude/scripts/check_harness.py", "CLAUDE.md", "AGENTS.md", ".cl
               ".claude/dev-servers.json", ".claude/scripts/devserver.py", ".claude/scripts/context_check.py", ".claude/HARNESS_VERSION",
               ".taskmaster/tasks.py", ".taskmaster/render_tasks_md.py", ".taskmaster/tasks/tasks.json",
               ".taskmaster/docs/prd.md", ".taskmaster/docs/parking-lot.md", ".taskmaster/docs/manual-checks.md",
-              ".taskmaster/docs/human-checklist.md"]
+              ".taskmaster/docs/human-checklist.md", ".taskmaster/run_checks.py", ".taskmaster/checks.json"]
 LINE_CAPS = {"CLAUDE.md": 60, "AGENTS.md": 80, ".claude/rules/memory.md": 80}
 PLACEHOLDER = re.compile(r"\{\{[A-Z0-9_]+\}\}")
 SECRET = re.compile(r"(sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}"
@@ -299,6 +299,15 @@ def check_plan(root, allow_empty):
     r = subprocess.run([sys.executable, str(tp), "next"], cwd=root, capture_output=True, text=True)
     if r.returncode != 0 and any(t.get("status") == "pending" for t in data["tasks"]):
         err("tasks.py next finds nothing workable although tasks are pending (dependency problem)")
+    rc = root / ".taskmaster/run_checks.py"
+    if rc.exists():
+        r = subprocess.run([sys.executable, str(rc), "plan"], cwd=root, capture_output=True, text=True)
+        if r.returncode != 0:
+            for line in r.stdout.splitlines():
+                if "REFUSED:" in line:
+                    err(f"script task check refused: {line.split('REFUSED:', 1)[1].strip()}")
+            if "REFUSED:" not in r.stdout:
+                err(f"run_checks.py plan failed: {(r.stderr or r.stdout).strip()[-200:]}")
     for t in data["tasks"]:
         ts = t.get("testStrategy", "").strip().lower()
         if t.get("status") == "pending" and ts in ("", "n/a", "none", "manual"):
