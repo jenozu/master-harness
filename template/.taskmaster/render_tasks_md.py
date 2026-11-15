@@ -31,5 +31,5 @@ for t in sorted(tasks, key=lambda t: (t.get("phase", 10**6), t["id"])):
         out.append(f"  _Test:_ {' '.join(t['testStrategy'].split())}")
     for s in t.get("subtasks", []):
         out.append(f"  - {box.get(s.get('status'), '[ ]')} {t['id']}.{s['id']} {s['title']}")
-(root / "TASKS.md").write_text("\n".join(out) + "\n", encoding="utf-8")
+(root / "TASKS.md").write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
 print(f"wrote TASKS.md ({len(tasks)} tasks)")

@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.1.0 (2026-11-15)
+- **Cheaper upgrades.** The installer now compares each harness-owned file with the template as it was at the
+  project's old version (from the master-harness git history). Files nobody edited are replaced quietly; only
+  files edited in the project are backed up and listed under CUSTOMIZED. Before, the lead diffed every replaced
+  file, which cost the most tokens of any upgrade step.
+- The installer prints the CHANGELOG's project actions since the old version, oldest first, so the lead doesn't
+  read the changelog.
+- UPGRADE.md works only from that output; no dry run. The template is cloned without `--depth` for the history.
+- `/harness upgrade` stops right away when the project is already current, and suggests `/model sonnet`.
+- Fix: the upgrade also wrote `HARNESS_VERSION` with CRLF on Windows.
+- Fix: on a Windows console, printing characters like `→` crashed the installer; every harness script now
+  prints UTF-8 safely.
+
+## 2.0.1 (2026-11-15)
+- **Fix: Windows line endings.** On Windows, `tasks.py`, `render_tasks_md.py` and the installer wrote
+  `tasks.json`, `TASKS.md` and `HARNESS_VERSION` with CRLF line endings. Projects whose CI checks whitespace
+  (`git diff --check`) failed on every harness commit. All harness writes now use LF on every OS.
+- The installer adds LF rules for harness files to `.gitattributes`, so git stores them with LF even when another
+  Windows tool writes CRLF.
+- `check_harness.py` reports harness files committed with CRLF, with the one-line fix.
+- Project action (upgrade): after `--upgrade`, run
+  `git add --renormalize CLAUDE.md AGENTS.md TASKS.md .claude .taskmaster .gitattributes` and commit it as
+  `normalize harness line endings` (skip if nothing changes). Then `check_harness.py` must show no CRLF error.
+
 ## 2.0.0 (2026-11-14)
 Breaking: merging and human steps work differently. Read the project actions.
 - **Merge gate.** New `.claude/scripts/merge_gate.py` is the only way the harness merges. It waits for CI, reading

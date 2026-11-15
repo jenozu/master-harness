@@ -346,9 +346,19 @@ def check_git(root):
         p = root / rel
         if p.exists() and p.stat().st_size == 0:
             err(f"{rel} is empty")
+    r = subprocess.run(["git", "ls-files", "--eol", "--", "CLAUDE.md", "AGENTS.md", "TASKS.md", ".claude",
+                        ".taskmaster"], cwd=root, capture_output=True, text=True)
+    crlf = [ln.split("\t", 1)[-1] for ln in r.stdout.splitlines() if ln.startswith("i/crlf") or " i/crlf" in ln[:12]]
+    if crlf:
+        err("harness files committed with Windows line endings (CRLF), which fails whitespace checks in CI: "
+            + ", ".join(crlf[:8]) + ". Fix: git add --renormalize CLAUDE.md AGENTS.md TASKS.md .claude .taskmaster "
+            "&& git commit -m 'normalize line endings'")
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252: never crash on "→" or "·"
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--target", default=".")
     ap.add_argument("--allow-empty-plan", action="store_true", help="don't fail when tasks.json has no tasks")

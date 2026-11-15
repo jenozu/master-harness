@@ -151,7 +151,7 @@ def write_log(fid, item, results, verdict, n):
                 f"exit {r['exit']} (expected {r['expect']})  stdout sha256 {r['sha256']}",
                 f"--- stdout, last {n} lines ---", tail(r["stdout"], n),
                 f"--- stderr, last {n} lines ---", tail(r["stderr"], n), ""]
-    path.write_text("\n".join(out), encoding="utf-8")
+    path.write_text("\n".join(out), encoding="utf-8", newline="\n")
     return path.relative_to(ROOT).as_posix()
 
 
@@ -267,6 +267,9 @@ def cmd_run(a):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252: never crash on "→" or "·"
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--file", default=tm.DEFAULT_FILE)
     p.add_argument("--tag", default="master")

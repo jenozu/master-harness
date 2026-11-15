@@ -1,12 +1,14 @@
 # UPGRADE: bring an existing project up to the latest master-harness
 
-Shortcut: with the `/harness` command installed (see README), just type `/harness upgrade`.
+Shortcut: with the `/harness` command installed (see README), just type `/harness upgrade`. Upgrades are
+mechanical: `/model sonnet` is enough and costs far less than Opus.
 
 You are the lead in a project that already has an agent setup. The human told you to follow this file from the
 master-harness clone at `.harness-tmp/`. Don't change app code and don't start a phase.
 
 ## 0. Get the template
-If `.harness-tmp/` doesn't exist: `git clone -q --depth 1 https://github.com/jenozu/master-harness .harness-tmp`.
+If `.harness-tmp/` doesn't exist: `git clone -q https://github.com/jenozu/master-harness .harness-tmp` (no
+`--depth`: the installer uses the history to tell untouched files from edited ones).
 `git status --short` must be clean first; if not, ask the human to commit or stash.
 
 ## 1. Which case is it?
@@ -16,24 +18,22 @@ If `.harness-tmp/` doesn't exist: `git clone -q --depth 1 https://github.com/jen
 
 ## 2. Normal upgrade
 ```
-python .harness-tmp/scripts/apply_template.py --target . --upgrade --dry-run
 python .harness-tmp/scripts/apply_template.py --target . --upgrade
 ```
-What it does: replaces harness-owned files (core agents, core skills, `rules.md`, `tasks.py`, renderer, scripts)
-and saves the old ones in `.harness-backup/<old-version>/`; adds new core files; adds new harness permissions to
+What it does: replaces harness-owned files (core agents, core skills, `rules.md`, `tasks.py`, renderer, scripts),
+saving copies of any this project edited in `.harness-backup/<old-version>/` (git has the rest); adds new core files; adds new harness permissions to
 settings.json without removing any. It never touches CLAUDE.md, AGENTS.md, memory.md, tasks.json, the PRD,
 parking lot, manual checks, dev-servers.json, or project/library rules and skills.
 
-Then:
-1. Read `.harness-tmp/CHANGELOG.md` from the old version to the new one. Apply anything it marks
-   "project action" (e.g. a new line for CLAUDE.md, a new field in tasks.json).
-2. For each replaced file, `diff .harness-backup/<old>/<file> <file>`. Old lines that were **project-specific
-   customizations** (a routing tweak, a project fact, a reviewer trigger) → move them where they belong now:
-   CLAUDE.md "Risky paths" / facts, a project rule file, or memory.md. Don't paste them back into owned files,
-   or the next upgrade overwrites them again.
+Then work only from what the installer printed (don't read the changelog or diff files yourself):
+1. **PROJECT ACTIONS**: apply each one, in order. `none` → skip.
+2. **CUSTOMIZED**: only these files were edited in this project. For each, `diff .harness-backup/<old>/<file> <file>`;
+   move project-specific lines (paths, commands, owner rules) into `.claude/rules/project.md`, AGENTS.md or a
+   project rule file, never back into the harness-owned file. `none` → skip. Files under "replaced, untouched"
+   need nothing.
 3. `python .claude/scripts/check_harness.py --no-git` → fix every ERROR.
-4. `rm -rf .harness-tmp .harness-backup`, commit `harness: upgrade to v<new>`, and report in at most 8 lines:
-   version change, files replaced, customizations moved, project actions done.
+4. `rm -rf .harness-tmp .harness-backup`, commit `harness: upgrade to v<new>`, and report in at most 6 lines:
+   old → new version, project actions done, customized files handled, anything the owner must decide.
 
 ## Switch a project to open permissions
 ```

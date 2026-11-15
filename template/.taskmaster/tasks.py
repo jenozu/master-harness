@@ -56,7 +56,7 @@ def load(path, tag):
 def save(path, data, tag):
     data[tag].setdefault("metadata", {})["updated"] = now()
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:  # LF on Windows too
         json.dump(data, f, indent=2, ensure_ascii=False)
         f.write("\n")
     os.replace(tmp, path)
@@ -700,6 +700,9 @@ def cmd_validate(a):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252: never crash on "→" or "·"
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--file", default=DEFAULT_FILE)
     p.add_argument("--tag", default="master")

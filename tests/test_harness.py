@@ -576,6 +576,141 @@ class HarnessCommand(unittest.TestCase):
         self.assertIn("raw.githubusercontent.com/jenozu/master-harness/main/user-skill/harness/SKILL.md", readme)
 
 
+class LineEndings(unittest.TestCase):
+    """Harness files are written and committed with LF, also on Windows."""
+
+    def setUp(self):
+        self.p = Project()
+
+    def tearDown(self):
+        self.p.cleanup()
+
+    def test_scripts_write_lf(self):
+        self.p.tasks("set-status", "1", "done")
+        run([PY, ".taskmaster/render_tasks_md.py"], self.p.dir)
+        for rel in (".taskmaster/tasks/tasks.json", "TASKS.md", ".claude/HARNESS_VERSION", ".claude/harness.json",
+                    ".taskmaster/checks.json", ".claude/settings.json", "CLAUDE.md", ".gitattributes"):
+            self.assertNotIn(b"\r\n", (self.p.dir / rel).read_bytes(), rel)
+
+    def test_gitattributes_added_once(self):
+        ga = (self.p.dir / ".gitattributes").read_text()
+        self.assertIn(".taskmaster/** text=auto eol=lf", ga)
+        run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(self.p.dir), "--upgrade"], self.p.dir)
+        self.assertEqual((self.p.dir / ".gitattributes").read_text().count("eol=lf"), ga.count("eol=lf"))
+
+    @unittest.skipIf(sys.platform == "win32", "Git for Windows converts the staged fixture; the check itself only "
+                     "reads the index (git ls-files --eol), which is the same on every OS")
+    def test_checker_flags_crlf_committed(self):
+        d = self.p.dir
+        git = ["git", "-c", "core.autocrlf=false", "-c", "user.name=t", "-c", "user.email=t@t"]
+        (d / ".gitattributes").unlink()
+        run(git + ["commit", "-q", "-am", "no attributes"], d)  # git reads .gitattributes from the index too
+        tj = d / ".taskmaster/tasks/tasks.json"
+        tj.write_bytes(tj.read_bytes().replace(b"\n", b"\r\n"))
+        run(git + ["add", "-A"], d)
+        run(git + ["commit", "-q", "-m", "crlf"], d)
+        out = self.p.check().stdout
+        self.assertIn("Windows line endings", out)
+        self.assertIn(".taskmaster/tasks/tasks.json", out)
+
+
+class CheapUpgrade(unittest.TestCase):
+    """Upgrades list only files edited in the project, and print the changelog's project actions."""
+
+    def setUp(self):
+        self.p = Project()
+        self.old = Path(tempfile.mkdtemp(prefix="oldtpl-"))
+        shutil.copytree(ROOT / "template", self.old, dirs_exist_ok=True)
+        # Pretend the harness changed two owned files since the old version, and the project is on that old version.
+        for rel in (".claude/agents/verifier.md", ".claude/skills/status/SKILL.md"):
+            older = (self.old / rel).read_text(encoding="utf-8") + "\nold line\n"
+            (self.old / rel).write_text(older, encoding="utf-8", newline="\n")
+            (self.p.dir / rel).write_text(older, encoding="utf-8", newline="\n")
+        (self.p.dir / ".claude/HARNESS_VERSION").write_text("1.5.0\n")
+
+    def tearDown(self):
+        self.p.cleanup()
+        shutil.rmtree(self.old, ignore_errors=True)
+
+    def upgrade(self, *extra):
+        return run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(self.p.dir), "--upgrade", *extra],
+                   self.p.dir).stdout
+
+    def test_untouched_files_need_no_review(self):
+        out = self.upgrade("--old-template", str(self.old))
+        self.assertIn("replaced, untouched since the old version: 2", out)
+        self.assertIn("CUSTOMIZED: none (nothing to review)", out)
+        self.assertFalse((self.p.dir / ".harness-backup").exists(), "nothing to back up")
+
+    def test_edited_file_is_listed_and_backed_up(self):
+        (self.p.dir / ".claude/agents/verifier.md").write_text("project edit\n", encoding="utf-8")
+        out = self.upgrade("--old-template", str(self.old))
+        self.assertIn("CUSTOMIZED (edited in this project", out)
+        self.assertIn("  .claude/agents/verifier.md", out.split("CUSTOMIZED")[1])
+        self.assertNotIn(".claude/skills/status/SKILL.md", out.split("CUSTOMIZED")[1].split("note:")[0])
+        self.assertEqual((self.p.dir / ".harness-backup/1.5.0/.claude/agents/verifier.md").read_text(),
+                         "project edit\n")
+
+    def test_crlf_copy_of_an_untouched_file_counts_as_untouched(self):
+        f = self.p.dir / ".claude/agents/verifier.md"
+        f.write_bytes(f.read_bytes().replace(b"\n", b"\r\n"))
+        self.assertIn("CUSTOMIZED: none", self.upgrade("--old-template", str(self.old)))
+
+    def test_project_actions_since_old_version_only(self):
+        out = self.upgrade("--old-template", str(self.old))
+        actions = out.split("PROJECT ACTIONS")[1]
+        self.assertIn("[2.0.0] Project action", actions)
+        self.assertIn("[2.0.1] Project action", actions)
+        self.assertNotIn("[1.5.0]", actions)
+        self.assertLess(actions.index("[2.0.0]"), actions.index("[2.0.1]"), "oldest first")
+        (self.p.dir / ".claude/HARNESS_VERSION").write_text((ROOT / "VERSION").read_text())
+        self.assertIn("PROJECT ACTIONS: none", self.upgrade())
+
+    @unittest.skipIf(subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--is-shallow-repository"],
+                                    capture_output=True, text=True).stdout.strip() != "false", "shallow clone")
+    def test_old_template_from_git_history(self):
+        old = subprocess.run(["git", "-C", str(ROOT), "show", "43db62f:template/.claude/agents/phase-runner.md"],
+                             capture_output=True, text=True, encoding="utf-8")
+        if old.returncode != 0:
+            self.skipTest("v1.5.0 commit not in this clone")
+        (self.p.dir / ".claude/agents/phase-runner.md").write_text(old.stdout, encoding="utf-8", newline="\n")
+        out = self.upgrade()
+        self.assertNotIn("couldn't find the v1.5.0 template", out)
+        self.assertIn(".claude/agents/phase-runner.md", out.split("CUSTOMIZED")[0])  # listed as untouched
+
+
+class WindowsConsole(unittest.TestCase):
+    def test_scripts_print_non_ascii_on_a_cp1252_console(self):
+        p = Project()
+        try:
+            env = dict(os.environ, PYTHONIOENCODING="cp1252")
+            p.tasks("add", "--title", "Checkout → receipt · ✓", "--phase", "0")
+            for args in ([".taskmaster/tasks.py", "show", "6"], [".taskmaster/tasks.py", "phase", "0"]):
+                r = subprocess.run([PY, *args], cwd=p.dir, capture_output=True, env=env)
+                self.assertEqual(r.returncode, 0, r.stderr)
+            (p.dir / ".claude/HARNESS_VERSION").write_text("1.5.0\n")
+            r = subprocess.run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(p.dir), "--upgrade"],
+                               cwd=p.dir, capture_output=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+        finally:
+            p.cleanup()
+
+
+    def test_every_script_starts(self):
+        p = Project()
+        try:
+            env = dict(os.environ, PYTHONIOENCODING="cp1252")
+            for script in (".claude/scripts/context_check.py", ".claude/scripts/merge_gate.py --help",
+                           ".claude/scripts/devserver.py --help", ".claude/scripts/check_harness.py --no-git",
+                           ".taskmaster/run_checks.py plan", ".taskmaster/tasks.py status",
+                           ".taskmaster/render_tasks_md.py"):
+                parts = script.split()
+                r = subprocess.run([PY, *parts], cwd=p.dir, capture_output=True, env=env)
+                self.assertNotIn(b"Traceback", r.stderr, script)
+        finally:
+            p.cleanup()
+
+
 class DevServer(unittest.TestCase):
     def test_start_status_stop(self):
         p = Project(rules="", skills="", settings="")

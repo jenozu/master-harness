@@ -209,6 +209,9 @@ def merge(slug, pr, branch):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252: never crash on "→" or "·"
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--pr", type=int, help="pull request number")
     ap.add_argument("--wait", action="store_true", help="poll CI until it finishes (up to ci_wait_minutes)")

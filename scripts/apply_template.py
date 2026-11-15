@@ -8,6 +8,9 @@ Bootstrap (new project; never overwrites existing files):
 Upgrade (existing project; replaces harness-owned files, backs up the old ones, never touches project content):
   python scripts/apply_template.py --target <repo> --upgrade [--values values.json]
   Library pieces can be added during an upgrade too (created only if missing): --skills vps --settings vps
+  The upgrade compares each harness-owned file with the template as it was at the project's old version (from
+  this clone's git history, or --old-template DIR). Untouched files are replaced quietly; only files someone edited
+  are backed up and listed for review. It also prints the CHANGELOG's project actions since the old version.
 
 values.json: {"PROJECT_NAME": "...", ..., "dev_servers": [ {...} ]}. See docs/placeholders.md.
 --dry-run prints what would happen without writing anything.
@@ -17,6 +20,7 @@ import datetime
 import json
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -87,6 +91,8 @@ class Plan:
     def __init__(self, target, dry):
         self.target, self.dry = target, dry
         self.created, self.kept, self.replaced, self.same, self.notes = [], [], [], [], []
+        self.customized, self.actions = [], None
+        self.old = None
         self.missing = {}
 
     def write(self, rel, text):
@@ -99,18 +105,35 @@ class Plan:
             self.missing[rel] = left
 
     def report(self):
-        for label, items in (("created", self.created), ("replaced (old copy in .harness-backup/)", self.replaced),
-                             ("kept existing (merge by hand if needed)", self.kept), ("unchanged", self.same)):
+        clean = [r for r in self.replaced if r not in self.customized]
+        for label, items in (("created", self.created), ("replaced, untouched since the old version", clean),
+                             ("kept existing (merge by hand if needed)", self.kept)):
             if items:
                 print(f"{label}: {len(items)}")
                 for i in items:
                     print(f"  {i}")
+        if self.same:
+            print(f"unchanged: {len(self.same)}")
+        if self.customized:
+            print(f"CUSTOMIZED (edited in this project; review only these: "
+                  f"diff .harness-backup/{self.old}/<file> <file>): {len(self.customized)}")
+            for i in self.customized:
+                print(f"  {i}")
+        elif self.replaced:
+            print("CUSTOMIZED: none (nothing to review)")
         for n in self.notes:
             print(f"note: {n}")
         if self.missing:
             print("UNFILLED PLACEHOLDERS (fill these in before running check_harness.py):")
             for rel, names in sorted(self.missing.items()):
                 print(f"  {rel}: {', '.join(names)}")
+        if self.actions is not None:
+            if self.actions:
+                print("PROJECT ACTIONS (from CHANGELOG, apply these in order; no need to read the rest):")
+                for line in self.actions:
+                    print(f"  {line}")
+            else:
+                print("PROJECT ACTIONS: none")
         if self.dry:
             print("(dry run: nothing written)")
 
@@ -165,6 +188,23 @@ def settings_with_fragments(names, base=None):
     return settings
 
 
+GITATTRIBUTES_LINES = [".claude/** text=auto eol=lf", ".taskmaster/** text=auto eol=lf", "TASKS.md text eol=lf",
+                       "CLAUDE.md text eol=lf", "AGENTS.md text eol=lf"]
+
+
+def ensure_gitattributes(plan):
+    """Harness files are stored with LF endings even when a Windows tool writes CRLF (keeps diffs and CI checks clean)."""
+    ga = plan.target / ".gitattributes"
+    have = ga.read_text(encoding="utf-8").splitlines() if ga.exists() else []
+    add = [l for l in GITATTRIBUTES_LINES if l not in have]
+    if add:
+        text = "\n".join(have).rstrip("\n")
+        text = (text + "\n\n" if text else "") + "# master-harness: LF line endings for harness files\n" + "\n".join(add) + "\n"
+        if not plan.dry:
+            ga.write_text(text, encoding="utf-8", newline="\n")
+        plan.notes.append(f".gitattributes: added LF rules for harness files")
+
+
 def ensure_gitignore(plan):
     gi = plan.target / ".gitignore"
     have = gi.read_text(encoding="utf-8").splitlines() if gi.exists() else []
@@ -202,16 +242,22 @@ def bootstrap(a, plan, values):
         plan.write(dst, fill(src.read_text(encoding="utf-8"), values))
         plan.created.append(dst)
     ensure_gitignore(plan)
+    ensure_gitattributes(plan)
     if not plan.dry:
         (plan.target / ".claude").mkdir(exist_ok=True)
-        (plan.target / ".claude/HARNESS_VERSION").write_text(VERSION + "\n", encoding="utf-8")
+        (plan.target / ".claude/HARNESS_VERSION").write_text(VERSION + "\n", encoding="utf-8", newline="\n")
 
 
 def upgrade(a, plan, values):
     vfile = plan.target / ".claude/HARNESS_VERSION"
     old = vfile.read_text(encoding="utf-8").strip() if vfile.exists() else "unknown"
     plan.notes.append(f"harness {old} -> {VERSION}")
+    plan.old = old
     backup = plan.target / ".harness-backup" / old
+    pristine = OldTemplate(old, a.old_template)
+    if not pristine.available:
+        plan.notes.append(f"couldn't find the v{old} template (shallow clone or unknown version): every replaced "
+                          "file is listed as CUSTOMIZED; clone master-harness without --depth to avoid this")
     for rel, src in template_files():
         dst = dest_name(rel)
         target = plan.target / dst
@@ -237,13 +283,17 @@ def upgrade(a, plan, values):
             plan.write(dst, new)
             plan.created.append(dst)
             continue
-        cur = target.read_text(encoding="utf-8", errors="replace")
-        if cur.replace("\r\n", "\n") == new:
+        cur = target.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+        if cur == new:
             plan.same.append(dst)
             continue
-        if not plan.dry:
-            (backup / dst).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(target, backup / dst)
+        was = pristine.text(src) if pristine.available else None
+        untouched = was is not None and cur == fill(was, values).replace("\r\n", "\n")
+        if not untouched:
+            plan.customized.append(dst)
+            if not plan.dry:
+                (backup / dst).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target, backup / dst)
         plan.write(dst, new)
         plan.replaced.append(dst)
     for rel, src in library_files("rules", split(a.rules)) + library_files("skills", split(a.skills)):
@@ -253,11 +303,87 @@ def upgrade(a, plan, values):
             plan.write(rel, fill(src.read_text(encoding="utf-8"), values))
             plan.created.append(rel)
     ensure_gitignore(plan)
+    ensure_gitattributes(plan)
     if not plan.dry:
         vfile.parent.mkdir(exist_ok=True)
-        vfile.write_text(VERSION + "\n", encoding="utf-8")
-    if plan.replaced:
-        plan.notes.append(f"old versions saved in .harness-backup/{old}/: re-apply any project-specific edits, then delete it")
+        vfile.write_text(VERSION + "\n", encoding="utf-8", newline="\n")
+    if plan.customized:
+        plan.notes.append(f"edited copies saved in .harness-backup/{old}/: move project-specific lines into "
+                          ".claude/rules/project.md (or another project file), then delete the backup")
+    plan.actions = changelog_actions(old if old != "unknown" else "0.0.0")
+
+
+def vtuple(v):
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return (0,)
+
+
+def changelog_actions(old):
+    """'Project action' bullets of every CHANGELOG section newer than `old`, oldest first."""
+    sections, cur = [], None
+    for line in (HERE / "CHANGELOG.md").read_text(encoding="utf-8").splitlines():
+        m = re.match(r"## (\d+(?:\.\d+)*)", line)
+        if m:
+            cur = (m.group(1), [])
+            sections.append(cur)
+        elif cur is not None:
+            cur[1].append(line)
+    out = []
+    for ver, lines in reversed(sections):
+        if vtuple(ver) <= vtuple(old):
+            continue
+        grab = []
+        for line in lines:
+            if line.startswith("- "):
+                grab = [line] if line.lower().startswith("- project action") else []
+                if grab:
+                    out.append(f"[{ver}] {line[2:]}")
+            elif grab and line.startswith("  "):
+                out.append("      " + line.strip())
+    return out
+
+
+class OldTemplate:
+    """The template as it was at the project's old version, to tell untouched files from customized ones."""
+
+    def __init__(self, old, override=None):
+        self.dir = Path(override).resolve() if override else None
+        self.commit = None
+        if self.dir is None and old not in ("unknown", "0.0.0"):
+            self.commit = self._find(old)
+
+    @staticmethod
+    def _git(*args):
+        try:
+            return subprocess.run(["git", "-C", str(HERE), *args], capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+
+    def _find(self, old):
+        r = self._git("log", "--format=%H", "--", "VERSION")
+        if r is None or r.returncode != 0:
+            return None
+        for c in r.stdout.split():
+            v = self._git("show", f"{c}:VERSION")
+            if v is not None and v.returncode == 0 and v.stdout.strip() == old:
+                return c
+        return None
+
+    @property
+    def available(self):
+        return self.dir is not None or self.commit is not None
+
+    def text(self, src):
+        """Old content of a template/library source file, or None if it didn't exist then."""
+        rel = Path(src).resolve().relative_to(HERE).as_posix()
+        if self.dir is not None:
+            p = self.dir / Path(rel).relative_to("template") if rel.startswith("template/") else None
+            return p.read_text(encoding="utf-8") if p and p.is_file() else None
+        r = self._git("show", f"{self.commit}:{rel}")
+        return r.stdout if r is not None and r.returncode == 0 else None
 
 
 def split(s):
@@ -265,6 +391,9 @@ def split(s):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252: never crash on "→" or "·"
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--target", required=True, help="the project repo root")
     p.add_argument("--values", help="JSON file with placeholder values")
@@ -273,6 +402,7 @@ def main():
     p.add_argument("--settings", help="library settings fragments to merge, comma-separated")
     p.add_argument("--upgrade", action="store_true")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--old-template", help=argparse.SUPPRESS)  # testing/offline: the old template folder
     a = p.parse_args()
     target = Path(a.target).resolve()
     if not target.is_dir():

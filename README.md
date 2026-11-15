@@ -29,7 +29,7 @@ Then, in any project folder in Claude Code (`/model opus` first):
 | You type | What happens |
 |---|---|
 | `/harness prd.md` | New project: installs the harness from your PRD, plans the phases, commits, reports |
-| `/harness upgrade` | Existing project: upgrades to the latest harness and applies the changelog's project actions |
+| `/harness upgrade` | Existing project: upgrades to the latest harness and applies the changelog's project actions. Use `/model sonnet` for this: it's mechanical and much cheaper |
 
 The command keeps itself up to date each time it runs.
 
