@@ -19,7 +19,8 @@ a phase.
 ## 2. Get the latest template
 `rm -rf .harness-tmp` only if it exists and is a master-harness clone (`git -C .harness-tmp remote get-url origin`
 contains `jenozu/master-harness`); if it's something else, stop and ask. Then
-`git clone -q --depth 1 https://github.com/jenozu/master-harness .harness-tmp` and read `.harness-tmp/VERSION`.
+`git clone -q https://github.com/jenozu/master-harness .harness-tmp` (full history: the upgrade uses it to skip
+files nobody edited) and read `.harness-tmp/VERSION`.
 
 Keep this command current: if `.harness-tmp/user-skill/harness/SKILL.md` differs from the installed copy at
 `~/.claude/skills/harness/SKILL.md`, copy the new one over it and mention it in the report.
@@ -32,8 +33,10 @@ Keep this command current: if `.harness-tmp/user-skill/harness/SKILL.md` differs
    you can't tell.
 
 ## 3b. Upgrade
-Follow `.harness-tmp/UPGRADE.md` to the end, including every "Project action" in `.harness-tmp/CHANGELOG.md`
-between the project's version (`.claude/HARNESS_VERSION`) and the new one. Don't start a phase afterwards.
+Already on the newest version (`.claude/HARNESS_VERSION` equals `.harness-tmp/VERSION`) → say so, remove
+`.harness-tmp`, stop. Otherwise follow `.harness-tmp/UPGRADE.md` step 2: the installer prints the project actions
+and the few files that need review; act only on those. Don't start a phase afterwards. If the session is on
+Opus, mention once that `/model sonnet` does upgrades for less.
 
 ## 4. Finish
 `.harness-tmp/` must be gone. Report as BOOTSTRAP/UPGRADE says, then one line: how to start (`/clear`, then

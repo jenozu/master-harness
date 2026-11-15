@@ -614,6 +614,71 @@ class LineEndings(unittest.TestCase):
         self.assertIn(".taskmaster/tasks/tasks.json", out)
 
 
+class CheapUpgrade(unittest.TestCase):
+    """Upgrades list only files edited in the project, and print the changelog's project actions."""
+
+    def setUp(self):
+        self.p = Project()
+        self.old = Path(tempfile.mkdtemp(prefix="oldtpl-"))
+        shutil.copytree(ROOT / "template", self.old, dirs_exist_ok=True)
+        # Pretend the harness changed two owned files since the old version, and the project is on that old version.
+        for rel in (".claude/agents/verifier.md", ".claude/skills/status/SKILL.md"):
+            older = (self.old / rel).read_text(encoding="utf-8") + "\nold line\n"
+            (self.old / rel).write_text(older, encoding="utf-8", newline="\n")
+            (self.p.dir / rel).write_text(older, encoding="utf-8", newline="\n")
+        (self.p.dir / ".claude/HARNESS_VERSION").write_text("1.5.0\n")
+
+    def tearDown(self):
+        self.p.cleanup()
+        shutil.rmtree(self.old, ignore_errors=True)
+
+    def upgrade(self, *extra):
+        return run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(self.p.dir), "--upgrade", *extra],
+                   self.p.dir).stdout
+
+    def test_untouched_files_need_no_review(self):
+        out = self.upgrade("--old-template", str(self.old))
+        self.assertIn("replaced, untouched since the old version: 2", out)
+        self.assertIn("CUSTOMIZED: none (nothing to review)", out)
+        self.assertFalse((self.p.dir / ".harness-backup").exists(), "nothing to back up")
+
+    def test_edited_file_is_listed_and_backed_up(self):
+        (self.p.dir / ".claude/agents/verifier.md").write_text("project edit\n", encoding="utf-8")
+        out = self.upgrade("--old-template", str(self.old))
+        self.assertIn("CUSTOMIZED (edited in this project", out)
+        self.assertIn("  .claude/agents/verifier.md", out.split("CUSTOMIZED")[1])
+        self.assertNotIn(".claude/skills/status/SKILL.md", out.split("CUSTOMIZED")[1].split("note:")[0])
+        self.assertEqual((self.p.dir / ".harness-backup/1.5.0/.claude/agents/verifier.md").read_text(),
+                         "project edit\n")
+
+    def test_crlf_copy_of_an_untouched_file_counts_as_untouched(self):
+        f = self.p.dir / ".claude/agents/verifier.md"
+        f.write_bytes(f.read_bytes().replace(b"\n", b"\r\n"))
+        self.assertIn("CUSTOMIZED: none", self.upgrade("--old-template", str(self.old)))
+
+    def test_project_actions_since_old_version_only(self):
+        out = self.upgrade("--old-template", str(self.old))
+        actions = out.split("PROJECT ACTIONS")[1]
+        self.assertIn("[2.0.0] Project action", actions)
+        self.assertIn("[2.0.1] Project action", actions)
+        self.assertNotIn("[1.5.0]", actions)
+        self.assertLess(actions.index("[2.0.0]"), actions.index("[2.0.1]"), "oldest first")
+        (self.p.dir / ".claude/HARNESS_VERSION").write_text((ROOT / "VERSION").read_text())
+        self.assertIn("PROJECT ACTIONS: none", self.upgrade())
+
+    @unittest.skipIf(subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--is-shallow-repository"],
+                                    capture_output=True, text=True).stdout.strip() != "false", "shallow clone")
+    def test_old_template_from_git_history(self):
+        old = subprocess.run(["git", "-C", str(ROOT), "show", "43db62f:template/.claude/agents/phase-runner.md"],
+                             capture_output=True, text=True, encoding="utf-8")
+        if old.returncode != 0:
+            self.skipTest("v1.5.0 commit not in this clone")
+        (self.p.dir / ".claude/agents/phase-runner.md").write_text(old.stdout, encoding="utf-8", newline="\n")
+        out = self.upgrade()
+        self.assertNotIn("couldn't find the v1.5.0 template", out)
+        self.assertIn(".claude/agents/phase-runner.md", out.split("CUSTOMIZED")[0])  # listed as untouched
+
+
 class DevServer(unittest.TestCase):
     def test_start_status_stop(self):
         p = Project(rules="", skills="", settings="")

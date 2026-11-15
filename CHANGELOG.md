@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0 (2026-11-15)
+- **Cheaper upgrades.** The installer now compares each harness-owned file with the template as it was at the
+  project's old version (from the master-harness git history). Files nobody edited are replaced quietly; only
+  files edited in the project are backed up and listed under CUSTOMIZED. Before, the lead diffed every replaced
+  file, which cost the most tokens of any upgrade step.
+- The installer prints the CHANGELOG's project actions since the old version, oldest first, so the lead doesn't
+  read the changelog.
+- UPGRADE.md works only from that output; no dry run. The template is cloned without `--depth` for the history.
+- `/harness upgrade` stops right away when the project is already current, and suggests `/model sonnet`.
+- Fix: the upgrade also wrote `HARNESS_VERSION` with CRLF on Windows.
+
 ## 2.0.1 (2026-11-15)
 - **Fix: Windows line endings.** On Windows, `tasks.py`, `render_tasks_md.py` and the installer wrote
   `tasks.json`, `TASKS.md` and `HARNESS_VERSION` with CRLF line endings. Projects whose CI checks whitespace
