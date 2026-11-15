@@ -10,6 +10,8 @@
 - UPGRADE.md works only from that output; no dry run. The template is cloned without `--depth` for the history.
 - `/harness upgrade` stops right away when the project is already current, and suggests `/model sonnet`.
 - Fix: the upgrade also wrote `HARNESS_VERSION` with CRLF on Windows.
+- Fix: on a Windows console, printing characters like `→` crashed the installer; every harness script now
+  prints UTF-8 safely.
 
 ## 2.0.1 (2026-11-15)
 - **Fix: Windows line endings.** On Windows, `tasks.py`, `render_tasks_md.py` and the installer wrote
