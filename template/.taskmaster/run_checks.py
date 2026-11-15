@@ -151,7 +151,7 @@ def write_log(fid, item, results, verdict, n):
                 f"exit {r['exit']} (expected {r['expect']})  stdout sha256 {r['sha256']}",
                 f"--- stdout, last {n} lines ---", tail(r["stdout"], n),
                 f"--- stderr, last {n} lines ---", tail(r["stderr"], n), ""]
-    path.write_text("\n".join(out), encoding="utf-8")
+    path.write_text("\n".join(out), encoding="utf-8", newline="\n")
     return path.relative_to(ROOT).as_posix()
 
 

@@ -576,6 +576,42 @@ class HarnessCommand(unittest.TestCase):
         self.assertIn("raw.githubusercontent.com/jenozu/master-harness/main/user-skill/harness/SKILL.md", readme)
 
 
+class LineEndings(unittest.TestCase):
+    """Harness files are written and committed with LF, also on Windows."""
+
+    def setUp(self):
+        self.p = Project()
+
+    def tearDown(self):
+        self.p.cleanup()
+
+    def test_scripts_write_lf(self):
+        self.p.tasks("set-status", "1", "done")
+        run([PY, ".taskmaster/render_tasks_md.py"], self.p.dir)
+        for rel in (".taskmaster/tasks/tasks.json", "TASKS.md", ".claude/HARNESS_VERSION", ".claude/harness.json",
+                    ".taskmaster/checks.json", ".claude/settings.json", "CLAUDE.md", ".gitattributes"):
+            self.assertNotIn(b"\r\n", (self.p.dir / rel).read_bytes(), rel)
+
+    def test_gitattributes_added_once(self):
+        ga = (self.p.dir / ".gitattributes").read_text()
+        self.assertIn(".taskmaster/** text=auto eol=lf", ga)
+        run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(self.p.dir), "--upgrade"], self.p.dir)
+        self.assertEqual((self.p.dir / ".gitattributes").read_text().count("eol=lf"), ga.count("eol=lf"))
+
+    def test_checker_flags_crlf_committed(self):
+        d = self.p.dir
+        git = ["git", "-c", "core.autocrlf=false", "-c", "user.name=t", "-c", "user.email=t@t"]
+        (d / ".gitattributes").unlink()
+        run(git + ["commit", "-q", "-am", "no attributes"], d)  # git reads .gitattributes from the index too
+        tj = d / ".taskmaster/tasks/tasks.json"
+        tj.write_bytes(tj.read_bytes().replace(b"\n", b"\r\n"))
+        run(git + ["add", "-A"], d)
+        run(git + ["commit", "-q", "-m", "crlf"], d)
+        out = self.p.check().stdout
+        self.assertIn("Windows line endings", out)
+        self.assertIn(".taskmaster/tasks/tasks.json", out)
+
+
 class DevServer(unittest.TestCase):
     def test_start_status_stop(self):
         p = Project(rules="", skills="", settings="")

@@ -346,6 +346,13 @@ def check_git(root):
         p = root / rel
         if p.exists() and p.stat().st_size == 0:
             err(f"{rel} is empty")
+    r = subprocess.run(["git", "ls-files", "--eol", "--", "CLAUDE.md", "AGENTS.md", "TASKS.md", ".claude",
+                        ".taskmaster"], cwd=root, capture_output=True, text=True)
+    crlf = [ln.split("\t", 1)[-1] for ln in r.stdout.splitlines() if ln.startswith("i/crlf") or " i/crlf" in ln[:12]]
+    if crlf:
+        err("harness files committed with Windows line endings (CRLF), which fails whitespace checks in CI: "
+            + ", ".join(crlf[:8]) + ". Fix: git add --renormalize CLAUDE.md AGENTS.md TASKS.md .claude .taskmaster "
+            "&& git commit -m 'normalize line endings'")
 
 
 def main():

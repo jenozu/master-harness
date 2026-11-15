@@ -165,6 +165,23 @@ def settings_with_fragments(names, base=None):
     return settings
 
 
+GITATTRIBUTES_LINES = [".claude/** text=auto eol=lf", ".taskmaster/** text=auto eol=lf", "TASKS.md text eol=lf",
+                       "CLAUDE.md text eol=lf", "AGENTS.md text eol=lf"]
+
+
+def ensure_gitattributes(plan):
+    """Harness files are stored with LF endings even when a Windows tool writes CRLF (keeps diffs and CI checks clean)."""
+    ga = plan.target / ".gitattributes"
+    have = ga.read_text(encoding="utf-8").splitlines() if ga.exists() else []
+    add = [l for l in GITATTRIBUTES_LINES if l not in have]
+    if add:
+        text = "\n".join(have).rstrip("\n")
+        text = (text + "\n\n" if text else "") + "# master-harness: LF line endings for harness files\n" + "\n".join(add) + "\n"
+        if not plan.dry:
+            ga.write_text(text, encoding="utf-8", newline="\n")
+        plan.notes.append(f".gitattributes: added LF rules for harness files")
+
+
 def ensure_gitignore(plan):
     gi = plan.target / ".gitignore"
     have = gi.read_text(encoding="utf-8").splitlines() if gi.exists() else []
@@ -202,9 +219,10 @@ def bootstrap(a, plan, values):
         plan.write(dst, fill(src.read_text(encoding="utf-8"), values))
         plan.created.append(dst)
     ensure_gitignore(plan)
+    ensure_gitattributes(plan)
     if not plan.dry:
         (plan.target / ".claude").mkdir(exist_ok=True)
-        (plan.target / ".claude/HARNESS_VERSION").write_text(VERSION + "\n", encoding="utf-8")
+        (plan.target / ".claude/HARNESS_VERSION").write_text(VERSION + "\n", encoding="utf-8", newline="\n")
 
 
 def upgrade(a, plan, values):
@@ -253,6 +271,7 @@ def upgrade(a, plan, values):
             plan.write(rel, fill(src.read_text(encoding="utf-8"), values))
             plan.created.append(rel)
     ensure_gitignore(plan)
+    ensure_gitattributes(plan)
     if not plan.dry:
         vfile.parent.mkdir(exist_ok=True)
         vfile.write_text(VERSION + "\n", encoding="utf-8")

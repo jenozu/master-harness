@@ -113,7 +113,7 @@ def start(s, wait):
     else:
         kwargs["start_new_session"] = True
     proc = subprocess.Popen(cmd, **kwargs)
-    pid_file(name).write_text(str(proc.pid))
+    pid_file(name).write_text(str(proc.pid), encoding="utf-8", newline="\n")
     if not s.get("health"):
         print(f"{name}: started (pid {proc.pid}, no health URL to wait on), log {log_path.relative_to(ROOT)}")
         return 0
