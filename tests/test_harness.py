@@ -679,6 +679,38 @@ class CheapUpgrade(unittest.TestCase):
         self.assertIn(".claude/agents/phase-runner.md", out.split("CUSTOMIZED")[0])  # listed as untouched
 
 
+class WindowsConsole(unittest.TestCase):
+    def test_scripts_print_non_ascii_on_a_cp1252_console(self):
+        p = Project()
+        try:
+            env = dict(os.environ, PYTHONIOENCODING="cp1252")
+            p.tasks("add", "--title", "Checkout → receipt · ✓", "--phase", "0")
+            for args in ([".taskmaster/tasks.py", "show", "6"], [".taskmaster/tasks.py", "phase", "0"]):
+                r = subprocess.run([PY, *args], cwd=p.dir, capture_output=True, env=env)
+                self.assertEqual(r.returncode, 0, r.stderr)
+            (p.dir / ".claude/HARNESS_VERSION").write_text("1.5.0\n")
+            r = subprocess.run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(p.dir), "--upgrade"],
+                               cwd=p.dir, capture_output=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+        finally:
+            p.cleanup()
+
+
+    def test_every_script_starts(self):
+        p = Project()
+        try:
+            env = dict(os.environ, PYTHONIOENCODING="cp1252")
+            for script in (".claude/scripts/context_check.py", ".claude/scripts/merge_gate.py --help",
+                           ".claude/scripts/devserver.py --help", ".claude/scripts/check_harness.py --no-git",
+                           ".taskmaster/run_checks.py plan", ".taskmaster/tasks.py status",
+                           ".taskmaster/render_tasks_md.py"):
+                parts = script.split()
+                r = subprocess.run([PY, *parts], cwd=p.dir, capture_output=True, env=env)
+                self.assertNotIn(b"Traceback", r.stderr, script)
+        finally:
+            p.cleanup()
+
+
 class DevServer(unittest.TestCase):
     def test_start_status_stop(self):
         p = Project(rules="", skills="", settings="")

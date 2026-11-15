@@ -11,7 +11,7 @@ can make it stop early but never late.
 Output, one line: CONTEXT_TOKENS=<n> LIMIT=<n> STATUS=OK|OVER|UNKNOWN. The lead calls it once per finished phase.
 Limit: --limit, else env HARNESS_CONTEXT_LIMIT, else 150000.
 """
-import argparse, json, os, re
+import argparse, json, os, re, sys
 from pathlib import Path
 
 
@@ -55,6 +55,9 @@ def last_usage(path):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252: never crash on "→" or "·"
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=int(os.environ.get("HARNESS_CONTEXT_LIMIT", "150000")))
     a = ap.parse_args()
