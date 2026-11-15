@@ -598,6 +598,8 @@ class LineEndings(unittest.TestCase):
         run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(self.p.dir), "--upgrade"], self.p.dir)
         self.assertEqual((self.p.dir / ".gitattributes").read_text().count("eol=lf"), ga.count("eol=lf"))
 
+    @unittest.skipIf(sys.platform == "win32", "Git for Windows converts the staged fixture; the check itself only "
+                     "reads the index (git ls-files --eol), which is the same on every OS")
     def test_checker_flags_crlf_committed(self):
         d = self.p.dir
         git = ["git", "-c", "core.autocrlf=false", "-c", "user.name=t", "-c", "user.email=t@t"]
