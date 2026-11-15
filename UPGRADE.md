@@ -1,5 +1,7 @@
 # UPGRADE: bring an existing project up to the latest master-harness
 
+Shortcut: with the `/harness` command installed (see README), just type `/harness upgrade`.
+
 You are the lead in a project that already has an agent setup. The human told you to follow this file from the
 master-harness clone at `.harness-tmp/`. Don't change app code and don't start a phase.
 

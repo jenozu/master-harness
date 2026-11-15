@@ -29,7 +29,8 @@ CORE_FILES = [".claude/scripts/check_harness.py", "CLAUDE.md", "AGENTS.md", ".cl
               ".claude/dev-servers.json", ".claude/scripts/devserver.py", ".claude/scripts/context_check.py", ".claude/HARNESS_VERSION",
               ".taskmaster/tasks.py", ".taskmaster/render_tasks_md.py", ".taskmaster/tasks/tasks.json",
               ".taskmaster/docs/prd.md", ".taskmaster/docs/parking-lot.md", ".taskmaster/docs/manual-checks.md",
-              ".taskmaster/docs/human-checklist.md", ".taskmaster/run_checks.py", ".taskmaster/checks.json"]
+              ".taskmaster/docs/human-checklist.md", ".taskmaster/run_checks.py", ".taskmaster/checks.json",
+              ".claude/scripts/merge_gate.py", ".claude/harness.json", ".claude/rules/project.md"]
 LINE_CAPS = {"CLAUDE.md": 60, "AGENTS.md": 80, ".claude/rules/memory.md": 80}
 PLACEHOLDER = re.compile(r"\{\{[A-Z0-9_]+\}\}")
 SECRET = re.compile(r"(sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}"
@@ -254,8 +255,27 @@ def check_json(root):
             deny = " ".join(s.get("permissions", {}).get("deny", []))
             if ".env" not in deny:
                 warn("settings.json: .env files are not in permissions.deny")
+            allow = s.get("permissions", {}).get("allow", [])
+            ask = " ".join(s.get("permissions", {}).get("ask", []))
+            if "/merge" not in ask and ("Bash" in allow or any("gh api" in r for r in allow)):
+                warn("settings.json: no ask rule for merging outside the merge gate (gh api .../merge)")
         except json.JSONDecodeError as e:
             err(f"settings.json is not valid JSON: {e}")
+    p = root / ".claude/harness.json"
+    if p.exists():
+        try:
+            h = json.loads(p.read_text(encoding="utf-8"))
+            if h.get("merge") not in ("auto", "safe-only", "owner"):
+                err("harness.json: merge must be auto, safe-only or owner")
+            if not isinstance(h.get("merge_deploys"), bool):
+                err("harness.json: merge_deploys must be true or false (does merging to the default branch go live?)")
+            if h.get("merge_deploys") and h.get("merge") == "auto":
+                warn("harness.json: merging deploys and merge is auto: every green PR goes live without review "
+                     "(safe-only is the usual choice for a live project)")
+            if not isinstance(h.get("max_phases_per_launch", 0), int) or h.get("max_phases_per_launch", 0) < 0:
+                err("harness.json: max_phases_per_launch must be a whole number (0 = no limit)")
+        except json.JSONDecodeError as e:
+            err(f"harness.json is not valid JSON: {e}")
     p = root / ".claude/dev-servers.json"
     if p.exists():
         try:

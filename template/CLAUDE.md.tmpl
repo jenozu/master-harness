@@ -18,9 +18,10 @@
 
 Escalation: haiku → sonnet → opus inside a task; phase-runner → lead when opus fails, scope changes, something is
 destructive, or nothing is workable without the human. Manual checks and human-only steps never stop a phase; they
-collect in `.taskmaster/docs/manual-checks.md` and `.taskmaster/docs/human-checklist.md`. Phases end with an
-auto-merged PR (`deliver`) and the lead starts the next phase without asking; when its context passes ~150K
-it stops between phases and tells you to `/clear` and `/run-phase <next>`. Nesting is capped by
+collect in `.taskmaster/docs/manual-checks.md` and `.taskmaster/docs/human-checklist.md`. Phases end with a PR
+(`deliver`); `merge_gate.py` merges it only if `.claude/harness.json` allows (auto / safe-only / owner, stricter
+when merging deploys), else the lead stops for you. Owner rules in `.claude/rules/project.md` override harness
+rules. When the lead's context passes ~150K it stops between phases: `/clear`, then `/run-phase <next>`. Nesting is capped by
 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2`.
 
 ## Phases

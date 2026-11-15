@@ -43,7 +43,10 @@ build commands, existing CLAUDE.md / AGENTS.md / .claude/, .gitignore, anything 
 Ask only when the answer changes phase 0 or the stack, for example:
 - the PRD doesn't say which stack or hosting, and the repo doesn't either;
 - there's a database and you can't tell whether local dev should use Docker or an existing install;
-- the PRD contradicts itself on something that changes the plan.
+- the PRD contradicts itself on something that changes the plan;
+- **whether merging to the default branch puts the code live**, if you can't tell. Signs that it does:
+  `vercel.json` or `netlify.toml`, a Vercel/Netlify/Render/Fly integration, or a workflow in `.github/workflows`
+  that deploys on push to the default branch. Real users or payments make it matter more.
 Everything else → assume, record it, move on.
 
 ## 4. Check the Claude Code docs
@@ -86,6 +89,12 @@ re-running won't overwrite files it already created). "kept existing" files: mer
   under 2 KB, only rules a model would get wrong without being told).
 - Library skills: fill their `{{...}}` values and paths; delete sections for tools this project doesn't use
   (e.g. the other migration tools in `db-migration`).
+- `.claude/harness.json` (merge rules, enforced by the merge gate): set `merge_deploys` from step 3. Merging
+  deploys → `"merge": "safe-only"` (agents merge only docs/tests/plan changes; app code waits for the owner),
+  unless the owner said otherwise. Not live → `"merge": "auto"`. Add the project's own sensitive folders (auth,
+  payments, admin, migrations) to `never_auto_paths`. `max_phases_per_launch` only if the owner asked for a cap.
+- `.claude/rules/project.md`: owner rules the PRD states as always/never (e.g. "back up the database before a
+  migration"). Keep `(none yet)` if there are none.
 - `.taskmaster/checks.json` (allowlist for free checks): keep only entries this stack uses and add any check-only
   tool it needs (e.g. `"alembic check"`, `"npx playwright test"`). Never add something that can send, publish,
   delete, install or spend (`git push`, `gh pr merge`, `npm publish`, `curl`, `ssh`).
@@ -128,5 +137,6 @@ a task (build the table for the report).
    3. Capability → task table.
    4. Assumptions you made, and open questions (also in memory.md).
    5. Human-only steps before or during the build.
-   6. How to start: `/clear`, then `/model opus`, then `/run-phase 0`. It runs phase after phase, merges PRs
-      itself and queues human-only steps in `.taskmaster/docs/human-checklist.md`.
+   6. Merge rules in one line: `merge` mode and whether merging deploys (from `.claude/harness.json`).
+   7. How to start: `/clear`, then `/model opus`, then `/run-phase 0`. It runs phase after phase, merges what
+      the merge rules allow, and queues human-only steps in `.taskmaster/docs/human-checklist.md`.

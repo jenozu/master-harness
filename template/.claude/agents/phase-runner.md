@@ -29,15 +29,17 @@ is complete or you hit a real escalation (below).
    already has changes for it, send it to the verifier first; don't dispatch another builder on it.
 
 ## Loop
-Repeat until every task in the phase is `done`, `cancelled` or `deferred`:
+Repeat until every task in the phase is `done`, `cancelled` or `deferred`, or the only ones left are queued human
+steps (`tasks.py phase <n>` says "agent work done"):
 1. `python .taskmaster/tasks.py next --phase <n>`. If it says nothing is workable but phase tasks remain, find out
    why (usually a human-only task or a failed dependency) and handle it under "Escalate".
 2. A task flagged **human** (`tasks.py show` prints `flags: human`): don't send it to a builder, and don't stop
    for it. Prepare anything the agents can (scripts, exact commands), append the steps to
    `.taskmaster/docs/human-checklist.md` (format in that file), then:
-   - Its result is only needed at run time (credentials, DNS, an account, a deploy approval) → log
-     "human step queued: see human-checklist.md", mark it `done`, and let later tasks build against
-     placeholders, mocks or env vars. Say so in their logs.
+   - Its result is only needed at run time (credentials, DNS, an account, a deploy approval, a migration the
+     owner applies) → `python .taskmaster/tasks.py queue <id>`. It stays open on the checklist and tasks that
+     depend on it become workable against placeholders, mocks or env vars; say so in their logs. **Never mark a
+     human task `done` yourself.** If merging deploys, the merge gate holds the PR until the owner confirms it.
    - Later tasks can't be built or tested without it (a decision that changes what to build) → leave it pending,
      work on everything else, and only if nothing workable is left finish with HUMAN NEEDED.
 3. A **script task** (`tasks.py next` prints `SCRIPT TASK`): no builder, no verifier, no tokens. Run
@@ -59,7 +61,8 @@ When the verifier says MANUAL CHECK NEEDED but everything automatic passed, add 
 `done` and continue. The human runs the list at the end of the phase.
 
 ## Delivery doesn't stop you either
-At the end of the phase run the preloaded `deliver` skill: PR, wait for CI, merge automatically when green.
+At the end of the phase run the preloaded `deliver` skill: PR, then the merge gate decides (merge, fix CI, or wait
+for the owner). A phase whose PR waits for the owner is still COMPLETE; say so on the PR line.
 Red CI is a failed task: fix it through the builder ladder. A merge only a human can do goes on the checklist and
 you keep going.
 
@@ -89,7 +92,7 @@ PHASE STATUS: COMPLETE | PARTIAL | ESCALATE | HUMAN NEEDED
 PHASE: <n>   DONE THIS RUN: <ids>   REMAINING: <ids or none>
 ROUTING: script <passed>/<failed>, haiku <first-try>/<escalated>, sonnet <n>/<n>, opus <n>/<n>
 MANUAL CHECKS WAITING: <agent-checkable n, eyes-on n>   HUMAN CHECKLIST: <open items n>
-PR: <#number merged | auto-merge set | on checklist | none>
+PR: <#number merged | auto-merge set | #number waiting for owner: <reasons> | none>
 ISSUE (if not COMPLETE): task <id> - <what's wrong, 2-4 lines>
 TRIED: <tier: approach -> result, one line each>
 OPTIONS: <1-3 concrete options, recommendation first>

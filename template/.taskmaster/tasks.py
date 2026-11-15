@@ -3,10 +3,12 @@
 
 Run from the repo root:  python .taskmaster/tasks.py [--file PATH] [--tag TAG] <command> ...
 
-Commands: init, status, phase, list, next, show, set-status, log, add, validate
+Commands: init, status, phase, list, next, show, set-status, log, add, queue, validate
 IDs are "3" for a task and "3.2" for subtask 2 of task 3.
 Phases live in metadata.phases ([{"id": 0, "name": "Foundation"}, ...]); each top-level task has "phase".
 Optional task flags: "human": true (only the human can do it), "review": true (reviewer agent after verifier).
+A human task can be queued ("queued": true, `tasks.py queue <id>`): it stays pending on the human checklist, but
+tasks that depend on it may be built against placeholders. Only the human's confirmation marks it done.
 Script tasks: "runner": "script" plus "check" (a list of commands) are run by run_checks.py with no model at all.
 """
 import argparse
@@ -181,6 +183,33 @@ def done_ids(tasks):
     return out
 
 
+def is_queued(item, parent=None):
+    return bool(item.get("queued")) and bool(item.get("human") or (parent or {}).get("human")) \
+        and status_of(item) in ("pending", "in-progress", "review")
+
+
+def met_ids(tasks):
+    """Ids that count as met for dependencies: done, plus queued human steps (agents build around them)."""
+    out = done_ids(tasks)
+    for t in tasks:
+        if is_queued(t):
+            out.add(str(t["id"]))
+        for s in t.get("subtasks", []):
+            if is_queued(s, t):
+                out.add(f"{t['id']}.{s['id']}")
+    return out
+
+
+def queued_human(tasks):
+    """Open queued human steps as (full id, title, phase)."""
+    out = []
+    for t in tasks:
+        for item, parent in [(t, None)] + [(s, t) for s in t.get("subtasks", [])]:
+            if is_queued(item, parent):
+                out.append((full_id(item, parent), item.get("title", ""), phase_of(t)))
+    return out
+
+
 def deps_of(item, parent):
     return [norm_dep(d, parent) for d in item.get("dependencies", [])]
 
@@ -220,8 +249,8 @@ def open_status(item):
 
 
 def current_phase(tasks):
-    """Lowest phase that still has open top-level tasks, or None."""
-    ph = [phase_of(t) for t in tasks if open_status(t) and phase_of(t) is not None]
+    """Lowest phase that still has open top-level tasks (not counting queued human steps), or None."""
+    ph = [phase_of(t) for t in tasks if open_status(t) and not is_queued(t) and phase_of(t) is not None]
     return min(ph) if ph else None
 
 
@@ -231,7 +260,7 @@ def pick_next(tasks, phase=None):
     """Resume in-progress work first, then highest priority with deps satisfied.
     Descends into subtasks so the result is the actual unit of work.
     With phase set, only tasks in that phase are considered."""
-    done = done_ids(tasks)
+    done = met_ids(tasks)
     if phase is not None:
         tasks = [t for t in tasks if phase_of(t) == phase]
     live = ("pending", "in-progress")
@@ -242,7 +271,7 @@ def pick_next(tasks, phase=None):
         if status_of(t) != "in-progress":
             continue
         for s in t.get("subtasks", []):
-            if status_of(s) in live and not unmet(s, t, done):
+            if status_of(s) in live and not is_queued(s, t) and not unmet(s, t, done):
                 subs.append((t, s))
     if subs:
         subs.sort(key=lambda ts: (0 if status_of(ts[1]) == "in-progress" else 1,
@@ -251,14 +280,14 @@ def pick_next(tasks, phase=None):
         return subs[0]
 
     # 2. top-level tasks
-    elig = [t for t in tasks if status_of(t) in live and not unmet(t, None, done)]
+    elig = [t for t in tasks if status_of(t) in live and not is_queued(t) and not unmet(t, None, done)]
     if not elig:
         return None
     elig.sort(key=lambda t: (0 if status_of(t) == "in-progress" else 1,
                              -prio(t), len(t.get("dependencies", [])), t["id"]))
     top = elig[0]
     # descend into first workable subtask, if any are left
-    open_subs = [s for s in top.get("subtasks", []) if status_of(s) in live]
+    open_subs = [s for s in top.get("subtasks", []) if status_of(s) in live and not is_queued(s, top)]
     for s in open_subs:
         if not unmet(s, top, done):
             return top, s
@@ -313,6 +342,8 @@ def validate(tasks, meta=None):
                 elif parent is None and "." not in d and int(d) > t["id"]:
                     errors.append(f"{fid}: depends on later task {d} (tasks may depend only on lower ids)")
             errors.extend(check_problems(item, fid))
+            if item.get("queued") and not (item.get("human") or (parent or {}).get("human")):
+                errors.append(f"{fid}: queued is only for human tasks")
             if not item.get("testStrategy") and st not in ("cancelled", "deferred"):
                 warns.append(f"{fid}: no testStrategy")
             if st in ("pending", "in-progress"):
@@ -362,6 +393,8 @@ def line(item, parent=None, indent=""):
         extra += f" c{item['complexity']}"
     if item.get("human"):
         extra += " [HUMAN]"
+    if is_queued(item, parent):
+        extra += " [QUEUED]"
     if item.get("runner") == "script":
         extra += " [SCRIPT]"
     return f"{indent}{ICON.get(status_of(item), '[ ]')} {fid} {item.get('title', '')}{extra}"
@@ -445,10 +478,16 @@ def cmd_phase(a):
         print(line(t))
     left = [str(t["id"]) for t in pts if open_status(t)]
     human = [str(t["id"]) for t in pts if open_status(t) and t.get("human")]
+    queued = [fid for fid, _, ph in queued_human(tasks) if ph == a.n]
     print(f"remaining: {', '.join(left) or 'none'}")
     if human:
         print(f"human-only: {', '.join(human)}")
-    if left and pick_next(tasks, a.n) is None:
+    if queued:
+        print(f"queued for the human (agents build around them): {', '.join(queued)}")
+    agent_left = [x for x in left if x not in queued]
+    if left and not agent_left:
+        print("agent work done: only queued human steps remain")
+    elif left and pick_next(tasks, a.n) is None:
         print("blocked: no open task in this phase has its dependencies met")
 
 
@@ -527,7 +566,7 @@ def cmd_set_status(a):
     data = load(a.file, a.tag)
     tasks = data[a.tag]["tasks"]
     item, parent = find(tasks, a.id)
-    done = done_ids(tasks)
+    done = met_ids(tasks)
     if a.status in ("in-progress", "done") and not a.force:
         miss = unmet(item, parent, done)
         if miss:
@@ -538,6 +577,8 @@ def cmd_set_status(a):
         if open_subs:
             die(f"{a.id} still has open subtasks: {', '.join(open_subs)} (use --force to override)")
     item["status"] = a.status
+    if a.status in ("done", "cancelled"):
+        item.pop("queued", None)
     msgs = []
     if parent and a.status == "in-progress" and status_of(parent) == "pending":
         parent["status"] = "in-progress"
@@ -632,6 +673,20 @@ def cmd_add(a):
     print(f"added {fid}: {a.title}")
 
 
+def cmd_queue(a):
+    data = load(a.file, a.tag)
+    item, parent = find(data[a.tag]["tasks"], a.id)
+    if not (item.get("human") or (parent or {}).get("human")):
+        die(f"{a.id} is not a human task; only human steps can be queued")
+    if not open_status(item):
+        die(f"{a.id} is {status_of(item)}; nothing to queue")
+    item["queued"] = True
+    entry = f"[{now()}] human step queued: see human-checklist.md (agents may build around it; stays open until the human confirms)"
+    item["details"] = (item.get("details", "").rstrip() + "\n\n" + entry).lstrip("\n")
+    save(a.file, data, a.tag)
+    print(f"{a.id} queued for the human; dependent tasks are now workable")
+
+
 def cmd_validate(a):
     data = load(a.file, a.tag)
     errors, warns = validate(data[a.tag]["tasks"], meta_of(data, a.tag))
@@ -694,6 +749,9 @@ def main():
     sp.add_argument("--check", action="append", help="a command the script runs, e.g. \"ruff check .\" "
                     "(repeatable; no shell operators; for a cwd, edit tasks.json: {\"cmd\": [...], \"cwd\": \"dir\"})")
     sp.set_defaults(fn=cmd_add)
+    sp = sub.add_parser("queue", help="queue a human task: it stays open, dependents become workable")
+    sp.add_argument("id")
+    sp.set_defaults(fn=cmd_queue)
     sub.add_parser("validate").set_defaults(fn=cmd_validate)
 
     a = p.parse_args()

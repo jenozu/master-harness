@@ -1,7 +1,7 @@
 # tasks.json schema
 
 Paths and fields follow Task Master conventions (`.taskmaster/tasks/tasks.json`, tag `master`) so the real
-Task Master tool could adopt a project later. Extra fields: `phase`, `human`, `review`, `runner`, `check`, `metadata.phases`.
+Task Master tool could adopt a project later. Extra fields: `phase`, `human`, `review`, `queued`, `runner`, `check`, `metadata.phases`.
 
 ```json
 {
@@ -46,6 +46,7 @@ Task Master tool could adopt a project later. Extra fields: `phase`, `human`, `r
 | `complexity` | 1-10. Starting model: 1-3 haiku, 4-6 sonnet, 7+ opus (split first). Subtasks default to parent − 2. |
 | `dependencies` | Top-level: lower task ids (`3`, or `"2.1"` for a subtask). In a subtask: a bare number is a sibling. |
 | `human` | `true` = only the human can do it. Routed as HUMAN NEEDED, never to a builder. |
+| `queued` | Human tasks only, set by `tasks.py queue <id>`: the step is on the human checklist and tasks that depend on it may be built against placeholders. It stays open; only the human's confirmation marks it done. While any are queued and merging deploys, the merge gate holds the PR. |
 | `review` | `true` = the reviewer must approve after the verifier passes. |
 | `runner` | `"agent"` (default when missing) or `"script"`. Script tasks are run by `run_checks.py` with no model: free. |
 | `check` | Script tasks: the commands to run, each an argument list (`["ruff", "check", "."]`) or `{"cmd": [...], "cwd": "frontend", "expect": 0, "timeout": 600}`. No shell strings, `cd`, `&&`, pipes, shells or `python -c`. The first words must match an entry in `.taskmaster/checks.json` `allow`. |
@@ -62,7 +63,7 @@ testStrategy, complexity 7+ without subtasks, blocked-by-cancelled tasks, and mo
 `status`, `phase [n]`, `list [--status s] [--subtasks]`, `next [--phase n]`, `show <id>`,
 `set-status <id> <status> [--force]`, `log <id> "text"`, `add --title ... [--parent id] [--phase n]
 [--complexity n] [--deps 1,2] [--test ...] [--details ...] [--human] [--review] [--runner script --check "ruff check ."]`,
-`validate`, `init [--project name]`.
+`queue <id>`, `validate`, `init [--project name]`.
 
 ## Free checks: `run_checks.py`
 `python .taskmaster/run_checks.py plan [--phase n]` lists open script tasks in dependency order (runs nothing;

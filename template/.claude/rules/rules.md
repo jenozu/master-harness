@@ -1,6 +1,9 @@
 # Rules (always loaded, for the main session and every subagent)
 
-<!-- Harness-owned file: UPGRADE.md may replace it. Put project-specific rules in other files in this folder. -->
+<!-- Harness-owned file: UPGRADE.md may replace it. Put project-specific rules in .claude/rules/project.md. -->
+
+**Precedence:** `.claude/rules/project.md` (the owner's project rules) overrides this file and the harness skills
+and agents wherever they conflict. Merge behaviour is set in `.claude/harness.json` and enforced by the merge gate.
 
 ## Scope and drift
 - The plan is `.taskmaster/`. Work only on the task you were given, or the one `tasks.py next` returns.
@@ -39,15 +42,20 @@
 - Work on a branch, never directly on the default branch. Commit per task with the id: `task 7.2: <short title>`.
   Nothing a task created may stay untracked.
 - Never commit generated junk (virtualenvs, node_modules, build output, caches, `.claude/tmp/`).
-- Push after every task commit. At the end of each phase, and before any stop, use the `deliver` skill: open a PR,
-  and **merge it automatically once checks pass**. Don't ask the human to merge or approve. Never merge red, never
-  force-push, never bypass checks.
+- Push the work branch after every task commit. At the end of each phase, and before any stop, use the `deliver`
+  skill: open a PR, then let `python .claude/scripts/merge_gate.py` decide. It merges when `.claude/harness.json`
+  allows it and CI is green; otherwise the PR waits for the owner.
+- **Merge only through the merge gate.** Never merge any other way (`gh pr merge`, `gh api .../merge`, a merge
+  pushed to the default branch), never merge red, never force-push, never bypass checks.
 
 ## Keep going, don't wait for approval
-- "Phase done, PR merged, shall I continue?" is never the right ending. Start the next phase right away.
+- "Phase done, PR merged, shall I continue?" is never the right ending. Start the next phase right away (unless
+  the PR is waiting for the owner, or `max_phases_per_launch` in `.claude/harness.json` is reached).
 - If a human step exists but work can continue without it, **queue it and continue**: append it to
   `.taskmaster/docs/human-checklist.md` as `- [ ] **Task <id>: <title>**: exact steps, where to run them, what to
-  send back`, build against placeholders/mocks/env vars, and log it on the task.
+  send back`, run `python .taskmaster/tasks.py queue <id>` (the task stays open; tasks that depend on it become
+  workable), build against placeholders/mocks/env vars, and log it on the task. **Never mark a human task done
+  yourself**: only the human's confirmation does that.
 - Stop only when the human is truly critical right now: nothing workable is left, the next step needs credentials
   or an account that every remaining task depends on, money, a destructive action, or a goal/non-goal change.
 

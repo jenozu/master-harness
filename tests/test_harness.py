@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -398,6 +399,181 @@ class ScriptChecks(unittest.TestCase):
         mods |= {n.module.split(".")[0] for n in ast.walk(ast.parse(src)) if isinstance(n, ast.ImportFrom)}
         self.assertLessEqual(mods, {"argparse", "datetime", "hashlib", "json", "os", "shutil", "subprocess",
                                     "sys", "time", "pathlib", "tasks"})
+
+
+class MergeGate(unittest.TestCase):
+    """merge_gate.py decisions (offline: --ci and --files, so no GitHub calls)."""
+
+    def setUp(self):
+        self.p = Project()
+
+    def tearDown(self):
+        self.p.cleanup()
+
+    def cfg(self, **kw):
+        hj = self.p.dir / ".claude/harness.json"
+        d = json.loads(hj.read_text())
+        d.update(kw)
+        hj.write_text(json.dumps(d))
+
+    def gate(self, ci, files):
+        return run([PY, ".claude/scripts/merge_gate.py", "--ci", ci, "--files", files], self.p.dir, check=False)
+
+    def test_auto_merges_green_and_never_red_or_pending(self):
+        r = self.gate("green", "app/page.tsx")
+        self.assertEqual((r.returncode, r.stdout.splitlines()[0]), (0, "DECISION=MERGE"))
+        r = self.gate("red", "app/page.tsx")
+        self.assertEqual((r.returncode, r.stdout.splitlines()[0]), (1, "DECISION=FIX_CI"))
+        r = self.gate("pending", "README.md")
+        self.assertEqual((r.returncode, r.stdout.splitlines()[0]), (4, "DECISION=CI_TIMEOUT"))
+        self.assertEqual(self.gate("none", "app/page.tsx").returncode, 0, "no CI at all: verifier already ran tests")
+
+    def test_owner_mode_never_merges(self):
+        self.cfg(merge="owner")
+        r = self.gate("green", "README.md")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("merge mode is owner", r.stdout)
+
+    def test_safe_only(self):
+        self.cfg(merge="safe-only")
+        ok = "README.md,docs/setup.md,tests/test_x.py,src/a.test.ts,.taskmaster/tasks/tasks.json,TASKS.md," \
+             ".claude/rules/memory.md,.taskmaster/docs/human-checklist.md"
+        self.assertEqual(self.gate("green", ok).returncode, 0)
+        for bad in ("app/api/checkout/route.ts", ".github/workflows/ci.yml", "package.json",
+                    ".claude/skills/x/SKILL.md", "CLAUDE.md", "db/migrations/005.sql", ".taskmaster/tasks.py",
+                    ".claude/rules/project.md"):
+            r = self.gate("green", "README.md," + bad)
+            self.assertEqual(r.returncode, 3, bad)
+            self.assertIn(bad, r.stdout)
+
+    def test_live_project_waits_for_queued_human_steps_and_eyes_on_checks(self):
+        self.cfg(merge="auto", merge_deploys=True)
+        self.assertEqual(self.gate("green", "app/page.tsx").returncode, 0)
+        self.p.tasks("queue", "5")
+        r = self.gate("green", "app/page.tsx")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("human step 5 Point a domain at the VPS isn't done", r.stdout)
+        self.p.tasks("set-status", "5", "done")
+        self.assertEqual(self.gate("green", "app/page.tsx").returncode, 0)
+        mc = self.p.dir / ".taskmaster/docs/manual-checks.md"
+        mc.write_text(mc.read_text() + "\n### Task 4 - Phone UI (2026-11-14)\n1. Open on a phone\n")
+        r = self.gate("green", "app/page.tsx")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("eyes-on check", r.stdout)
+        self.cfg(merge_deploys=False)
+        self.assertEqual(self.gate("green", "app/page.tsx").returncode, 0, "not live: eyes-on doesn't block")
+
+    def test_missing_or_bad_config_fails_closed(self):
+        hj = self.p.dir / ".claude/harness.json"
+        hj.write_text("{not json")
+        self.assertEqual(self.gate("green", "README.md").returncode, 3)
+        hj.unlink()
+        r = self.gate("green", "README.md")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("no .claude/harness.json", r.stdout)
+
+    def test_ci_state_reads_check_runs_and_commit_statuses(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("mg", ROOT / "template/.claude/scripts/merge_gate.py")
+        mg = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mg)
+        ok = {"check_runs": [{"name": "test", "status": "completed", "conclusion": "success"}]}
+        self.assertEqual(mg.ci_state(ok, {"statuses": []})[0], "green")
+        self.assertEqual(mg.ci_state(ok, {"statuses": [{"context": "Vercel", "state": "failure"}]}),
+                         ("red", ["Vercel"]))
+        self.assertEqual(mg.ci_state(ok, {"statuses": [{"context": "Vercel", "state": "pending"}]})[0], "pending")
+        self.assertEqual(mg.ci_state({"check_runs": []}, {"statuses": []})[0], "none")
+        run_ = {"check_runs": [{"name": "e2e", "status": "in_progress", "conclusion": None}]}
+        self.assertEqual(mg.ci_state(run_, {"statuses": []})[0], "pending")
+        self.assertTrue(mg.is_safe(".claude/rules/memory.md", json.loads(
+            (ROOT / "template/.claude/harness.json").read_text())))
+
+    def test_checker_validates_harness_json(self):
+        self.cfg(merge="yolo")
+        self.assertIn("harness.json: merge must be", self.p.check("--no-git").stdout)
+        self.cfg(merge="auto", merge_deploys=True)
+        self.assertIn("every green PR goes live", self.p.check("--no-git").stdout)
+
+
+class QueuedHumanSteps(unittest.TestCase):
+    def setUp(self):
+        self.p = Project()
+        tj = self.p.dir / ".taskmaster/tasks/tasks.json"
+        data = json.loads(tj.read_text())
+        t = data["master"]["tasks"]
+        t[4]["phase"] = 2  # human DNS step in phase 2
+        t.append({"id": 6, "title": "Deploy script", "status": "pending", "priority": "medium", "phase": 2,
+                  "complexity": 3, "dependencies": [5], "details": "", "testStrategy": "bash deploy.sh --dry-run",
+                  "subtasks": []})
+        for x in t[:4]:
+            x["status"] = "done"
+        tj.write_text(json.dumps(data))
+
+    def tearDown(self):
+        self.p.cleanup()
+
+    def test_queue_unblocks_dependents_but_keeps_the_step_open(self):
+        self.assertIn("HUMAN STEP", self.p.tasks("next", "--phase", "2").stdout)
+        self.p.tasks("queue", "5")
+        self.assertIn("6 Deploy script", self.p.tasks("next", "--phase", "2").stdout)
+        self.p.tasks("set-status", "6", "done")
+        out = self.p.tasks("phase", "2").stdout
+        self.assertIn("[QUEUED]", out)
+        self.assertIn("agent work done: only queued human steps remain", out)
+        self.assertEqual(self.p.tasks("next", "--phase", "2", check=False).returncode, 1)
+        self.assertIn("current phase: None", self.p.tasks("phase").stdout, "queued steps do not hold a phase open")
+        self.p.tasks("set-status", "5", "done")
+        data = json.loads((self.p.dir / ".taskmaster/tasks/tasks.json").read_text())["master"]["tasks"]
+        self.assertNotIn("queued", data[4])
+
+    def test_only_human_tasks_can_be_queued(self):
+        r = self.p.tasks("queue", "6", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not a human task", r.stderr)
+
+
+class ContextCheck(unittest.TestCase):
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("cc", ROOT / "template/.claude/scripts/context_check.py")
+        self.cc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.cc)
+        self.base = Path(tempfile.mkdtemp(prefix="ctx-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def write(self, folder, name, tokens, age=0):
+        d = self.base / folder
+        d.mkdir(exist_ok=True)
+        f = d / name
+        f.write_text(json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": tokens}}}) + "\n")
+        t = time.time() - age
+        os.utime(f, (t, t))
+        return f
+
+    def test_only_this_project_and_the_larger_active_session(self):
+        cwd = "/work/shop"
+        enc = "-work-shop"
+        self.write("-work-other", "x.jsonl", 999999)
+        self.assertEqual(self.cc.transcripts(self.base, cwd), [], "never reads another project's transcripts")
+        self.write(enc, "a.jsonl", 40000)
+        self.write(enc, "b.jsonl", 120000, age=60)
+        self.write(enc, "old.jsonl", 900000, age=3600)
+        got = self.cc.transcripts(self.base, cwd)
+        self.assertEqual(sorted(f.name for f in got), ["a.jsonl", "b.jsonl"])
+        self.assertEqual(max(self.cc.last_usage(f) for f in got), 120000)
+
+
+class HarnessCommand(unittest.TestCase):
+    def test_user_skill_is_valid(self):
+        text = (ROOT / "user-skill/harness/SKILL.md").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("---\nname: harness\n"))
+        self.assertIn("disable-model-invocation: true", text)
+        self.assertIn("BOOTSTRAP.md", text)
+        self.assertIn("UPGRADE.md", text)
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("raw.githubusercontent.com/jenozu/master-harness/main/user-skill/harness/SKILL.md", readme)
 
 
 class DevServer(unittest.TestCase):

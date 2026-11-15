@@ -167,7 +167,7 @@ def cmd_plan(a):
     if not items:
         print("no open script tasks" + (f" in phase {a.phase}" if a.phase is not None else ""))
         return 0
-    done = tm.done_ids(data[a.tag]["tasks"])
+    done = tm.met_ids(data[a.tag]["tasks"])
     bad = 0
     for fid, item, parent in items:
         miss = tm.unmet(item, parent, done)
@@ -211,7 +211,7 @@ def cmd_run(a):
     for fid, _, _ in items:
         data = tm.load(a.file, a.tag)  # tasks.py changed the file after the last pass
         item, parent = tm.find(data[a.tag]["tasks"], fid)
-        miss = tm.unmet(item, parent, tm.done_ids(data[a.tag]["tasks"]))
+        miss = tm.unmet(item, parent, tm.met_ids(data[a.tag]["tasks"]))
         if miss:
             if a.only:
                 print(f"refused: {fid} is waiting on {', '.join(miss)}")

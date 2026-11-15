@@ -21,6 +21,17 @@ human ── /run-phase N ──▶ lead (main session, Opus)
 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` allows exactly lead → phase-runner → builders. Builders, the verifier and
 the reviewer have `Agent` disallowed.
 
+## Merging safely
+`.claude/scripts/merge_gate.py` is the only way a PR gets merged. It waits for CI (GitHub check runs and classic
+commit statuses), then applies `.claude/harness.json`:
+- `merge`: `auto` (any green PR), `safe-only` (only PRs whose files all match `safe_paths` and none of
+  `never_auto_paths`), or `owner` (never merges).
+- `merge_deploys: true` (merging goes live): also waits while human steps are queued or eyes-on checks are open,
+  so code can't ship before a migration, an env value or a human look.
+When the gate says OWNER, the lead stops at the phase boundary with the PR link and the reasons. Ask rules in
+settings.json stop agents from merging any other way. Owner rules in `.claude/rules/project.md` (seeded, never
+replaced) override the harness's own rules.
+
 ## Free checks
 Tasks tagged `runner: script` (each phase's gate task, plus anything else that is only commands: lint, types,
 tests, build, CI status) skip the ladder entirely. The phase-runner runs `python .taskmaster/run_checks.py run
@@ -63,6 +74,6 @@ tier escalated 3 times in a row, or files missing from git at the start. Manual 
 
 ## Owned vs seeded files
 - **Owned** (replaced by upgrades; keep project specifics out of them): core agents, core skills, `rules.md`,
-  `tasks.py`, `render_tasks_md.py`, `run_checks.py`, `.claude/scripts/*`, `prd-template.md`.
+  `tasks.py`, `render_tasks_md.py`, `run_checks.py`, `.claude/scripts/*` (incl. `merge_gate.py`), `prd-template.md`.
 - **Seeded** (created once, then the project's): CLAUDE.md, AGENTS.md, memory.md, settings.json,
-  dev-servers.json, tasks.json, checks.json, parking-lot.md, manual-checks.md, and any library or project rules and skills.
+  dev-servers.json, tasks.json, checks.json, harness.json, rules/project.md, parking-lot.md, manual-checks.md, and any library or project rules and skills.
