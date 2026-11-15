@@ -17,6 +17,8 @@
       "Bash(python .claude/scripts/context_check.py*)",
       "Bash(python3 .claude/scripts/context_check.py*)",
       "Bash(python3 .claude/scripts/check_harness.py*)",
+      "Bash(python .claude/scripts/merge_gate.py *)",
+      "Bash(python3 .claude/scripts/merge_gate.py *)",
       "Bash(git status *)",
       "Bash(git diff *)",
       "Bash(git log *)",
@@ -32,7 +34,10 @@
       "Bash(git push)",
       "Bash(git push origin *)",
       "Bash(scp *)",
-      "Bash(rsync *)"
+      "Bash(rsync *)",
+      "Bash(gh pr merge*)",
+      "Bash(gh api *pulls/*/merge*)",
+      "Bash(gh api *merge_method*)"
     ],
     "deny": [
       "Bash(git push --force *)",

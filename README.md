@@ -6,12 +6,34 @@ A reusable Claude Code setup that turns a PRD into a project Claude can build ph
 - **phase-runner** (Sonnet) runs a whole phase with no check-ins, then sends one short report.
 - **Builders** (Haiku → Sonnet → Opus) take each task at the cheapest model that can do it, and escalate up the
   ladder when they fail. A **verifier** (Haiku) and **reviewer** (Sonnet) check the work.
+- **Safe merging:** a script (`merge_gate.py`) decides every merge from `.claude/harness.json`: merge anything
+  green, only safe changes (docs, tests, plan), or nothing. If merging puts the code live, it also waits while your
+  steps (migrations, env values) or eyes-on checks are open.
 - **Free checks:** tasks that are only commands (lint, tests, build, each phase's final gate) run from a plain
   script with no model at all. A model is called only when one fails.
 - A **Taskmaster plan** in git (`.taskmaster/`) holds the phases, tasks, and work log, plus a small
   **memory.md**, so any session on any device picks up where the last one stopped.
 
-## Start a new project
+## The `/harness` command (install once per computer)
+
+Mac, Linux or Git Bash:
+```
+mkdir -p ~/.claude/skills/harness && curl -fsSL https://raw.githubusercontent.com/jenozu/master-harness/main/user-skill/harness/SKILL.md -o ~/.claude/skills/harness/SKILL.md
+```
+Windows PowerShell:
+```
+New-Item -ItemType Directory -Force "$HOME\.claude\skills\harness" | Out-Null; Invoke-WebRequest https://raw.githubusercontent.com/jenozu/master-harness/main/user-skill/harness/SKILL.md -OutFile "$HOME\.claude\skills\harness\SKILL.md"
+```
+Then, in any project folder in Claude Code (`/model opus` first):
+
+| You type | What happens |
+|---|---|
+| `/harness prd.md` | New project: installs the harness from your PRD, plans the phases, commits, reports |
+| `/harness upgrade` | Existing project: upgrades to the latest harness and applies the changelog's project actions |
+
+The command keeps itself up to date each time it runs.
+
+## Start a new project (without the command)
 
 1. Create the project repo and put your PRD in it (`prd.md` at the root is fine).
 2. Open Claude Code in that folder: `claude`, then `/model opus`.
@@ -28,7 +50,7 @@ repo is private, your machine's git login is used for the clone. If git asks, si
 
 | You type | What happens |
 |---|---|
-| `/run-phase 2` | The whole phase runs; you get one report (≤ 15 lines) |
+| `/run-phase 2` | Phases run one after another; you get a short report when one needs you |
 | `/clear` | Do this between phases. Everything needed is in the files |
 | `/status` | Where things stand, in 6 lines |
 | `/manual-checks run` | Agents run the checks they can (dev servers started in the background) |
@@ -47,6 +69,7 @@ stay with you.
 
 ## Upgrade an existing project
 
+`/harness upgrade`, or paste:
 ```
 Clone https://github.com/jenozu/master-harness into .harness-tmp and follow .harness-tmp/UPGRADE.md.
 ```

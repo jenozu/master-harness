@@ -32,6 +32,7 @@ SEEDED = {
     ".claude/rules/memory.md", ".claude/settings.json", ".claude/dev-servers.json",
     ".taskmaster/tasks/tasks.json", ".taskmaster/docs/parking-lot.md", ".taskmaster/docs/manual-checks.md",
     ".taskmaster/docs/human-checklist.md", ".taskmaster/checks.json",
+    ".claude/harness.json", ".claude/rules/project.md",
 }
 GITIGNORE_LINES = [
     ".env", ".env.*", "!.env.example",

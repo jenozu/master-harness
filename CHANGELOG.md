@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.0.0 (2026-11-14)
+Breaking: merging and human steps work differently. Read the project actions.
+- **Merge gate.** New `.claude/scripts/merge_gate.py` is the only way the harness merges. It waits for CI, reading
+  GitHub check runs **and** classic commit statuses (before, a failing status-only check such as a preview
+  deploy could be missed), gives up cleanly after `ci_wait_minutes`, and then applies the new seeded
+  `.claude/harness.json`:
+  - `merge`: `auto` (merge any green PR, the old behaviour), `safe-only` (merge only PRs that touch docs, tests or
+    the plan; app code waits for the owner), or `owner` (never merges).
+  - `merge_deploys`: whether merging to the default branch puts the code live. When true, the gate also holds the
+    PR while human steps are queued or eyes-on checks are open, so code can't ship before a migration, an env
+    value or a human look.
+  - When the gate says OWNER, the lead stops at the phase boundary with the PR link and the reasons.
+  - New ask rules in settings.json for `gh pr merge` and `gh api .../merge`, so agents can't merge around the gate
+    (the old `gh pr merge` ask rule never covered the harness's REST merge).
+- **Queued human steps.** `tasks.py queue <id>` replaces "mark the human task done and build around it". The task
+  stays open (`[QUEUED]`), dependents become workable, and only the human's confirmation marks it done.
+  `tasks.py phase <n>` reports "agent work done" when only queued steps remain.
+- **Project rules win.** New seeded `.claude/rules/project.md`: owner rules that override `rules.md` and the
+  harness skills, and that upgrades never touch.
+- **Phase cap.** `max_phases_per_launch` in harness.json (0 = no limit) stops the lead after N phases.
+- **Context check** reads only this project's transcripts; with two windows open it reports the larger one, so it
+  can stop early but never late.
+- **`/harness` command.** `user-skill/harness/SKILL.md`, installed once per computer (README): `/harness prd.md`
+  sets up a new project, `/harness upgrade` upgrades one. It updates itself when it runs.
+- BOOTSTRAP asks (or detects) whether merging deploys and writes harness.json; live projects default to safe-only.
+- `check_harness.py` validates harness.json and warns when merging deploys with `merge: auto`.
+- Project action (upgrade): `--upgrade` adds `merge_gate.py`, `harness.json` (defaults: `auto`, not deploying),
+  `rules/project.md` and the new permissions. Then:
+  1. **Ask the owner whether merging to the default branch puts the code live** (or detect it: vercel.json,
+     netlify.toml, a deploy-on-push workflow). Set `merge_deploys`. Live → `"merge": "safe-only"` unless the owner
+     says otherwise; a project rule like "the owner merges PRs" → `"merge": "owner"`. Add the project's sensitive
+     folders (auth, payments, admin, migrations, middleware) to `never_auto_paths`.
+  2. Move owner rules found in other rule files or old customizations into `.claude/rules/project.md`, and delete
+     hand-written merge rules there that harness.json now covers (say which in the report).
+  3. Human tasks that were marked done but whose step the owner hasn't confirmed (check human-checklist.md for
+     unticked boxes): set them back to `pending`, then `tasks.py queue <id>`.
+  4. `python .claude/scripts/check_harness.py --no-git` → 0 errors. Report the merge mode chosen.
+
 ## 1.5.0 (2026-11-14)
 - **Free checks.** Tasks can be tagged `"runner": "script"` with a `"check"` list of commands. The new
   `.taskmaster/run_checks.py` runs them with no model: no builder, no verifier, zero tokens. A model is only

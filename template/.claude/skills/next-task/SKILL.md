@@ -71,7 +71,7 @@ reviewer says CHANGES NEEDED, or the builder hit maxTurns (partial output).
 - One rung per failure. Retry the same tier only for a mechanical failure (service not running, wrong test path):
   fix the environment and retry once.
 - BLOCKED for a missing decision, credential or human-only step → don't climb the ladder. If the rest of the task can
-  be built against a placeholder, mock or env var, do that and queue the step in `human-checklist.md` (see the
+  be built against a placeholder, mock or env var, do that and queue the step in `human-checklist.md` with `tasks.py queue <id>` on the human task (see the
   phase-runner's rules). Otherwise leave the task pending, move to another task, and escalate only if nothing else is workable.
 - Log every rung: `python .taskmaster/tasks.py log <id> "escalate <from>→<to>: <one-line reason>"`.
 - Opus failed, or 2 escalations and still failing → stop this task and escalate to the lead (the phase-runner's
@@ -82,7 +82,8 @@ reviewer says CHANGES NEEDED, or the builder hit maxTurns (partial output).
    task is now wrong, `tasks.py log <later-id> "note from <id>: ..."`. Scope changes are an escalation, not an edit.
 2. Builder IDEAS → one dated line each in `.taskmaster/docs/parking-lot.md`.
 3. `python .taskmaster/tasks.py log <id> "done by <tier>[, escalated from <tier>]; verified"`
-4. `python .taskmaster/tasks.py set-status <id> done && python .taskmaster/render_tasks_md.py`
+4. `python .taskmaster/tasks.py set-status <id> done && python .taskmaster/render_tasks_md.py` (never for a
+   human task: those are queued, and only the human's confirmation marks them done)
 5. Stage the builder's FILES CHANGED plus `.taskmaster/` and `TASKS.md`, then `git status --short`: nothing the
    task created may stay untracked. `git commit -q -m "task <id>: <short title>"` (add your environment's
    attribution lines if it asks for them), then `git push -q -u origin HEAD` as a backup. The PR and merge happen
