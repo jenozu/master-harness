@@ -28,7 +28,9 @@ never touches existing tasks).
   owner must supply (third-party API keys) and DNS (if there's no wildcard apps domain) are `human` tasks.
 - **Live with it (optional):** close registration, first real use, fix-up from real feedback.
 
-Write them to `metadata.phases` as `[{"id": 0, "name": "Foundation"}, ...]`.
+Write them to `metadata.phases` as `[{"id": 0, "name": "Foundation"}, ...]`. Then store the PRD's goal (one or two
+sentences) and non-goals (short lines) for the agents, who read them in `tasks.py show` instead of the PRD:
+`python .taskmaster/tasks.py meta --goal '<goal>' --non-goal '<non-goal 1>' --non-goal '<non-goal 2>'`.
 
 ## 3. Tasks
 Add each task with `python .taskmaster/tasks.py add` (or write tasks.json directly for a large initial plan,
@@ -39,6 +41,11 @@ then run `validate`). Every task needs:
 - `dependencies`: only lower-numbered tasks, never a task in a later phase.
 - `testStrategy`: something runnable that proves it works (a test command, a curl, a script with expected
   output). "Looks right" is not a test. If part of it needs eyes on a screen, add that part as a manual step.
+- `verify` (optional, cheap): when the testStrategy is only commands (no screen, no judgment), also give them as
+  argument lists, e.g. `"verify": [["pytest", "-q", "tests/test_habits.py"]]` (`tasks.py add --verify "pytest -q
+  tests/test_habits.py"`). A task whose builder then changes only docs, tests or the plan is verified by
+  `run_checks.py verify` for free; anything touching app code still gets the verifier agent. Each command must
+  start with an entry in `.taskmaster/checks.json` `allow`.
 - `complexity` 1-10. It decides the starting model: **1-3 haiku** (exact files and steps, small), **4-6 sonnet**
   (normal feature work, anything touching auth/data/migrations), **7-10 opus** (cross-cutting, unclear, hard).
   Be honest: underscoring wastes a haiku attempt, overscoring wastes money.

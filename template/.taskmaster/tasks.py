@@ -3,7 +3,7 @@
 
 Run from the repo root:  python .taskmaster/tasks.py [--file PATH] [--tag TAG] <command> ...
 
-Commands: init, status, phase, list, next, show, set-status, log, add, queue, validate
+Commands: init, status, phase, list, next, show, set-status, log, add, queue, close, meta, validate
 IDs are "3" for a task and "3.2" for subtask 2 of task 3.
 Phases live in metadata.phases ([{"id": 0, "name": "Foundation"}, ...]); each top-level task has "phase".
 Optional task flags: "human": true (only the human can do it), "review": true (reviewer agent after verifier).
@@ -12,12 +12,16 @@ tasks that depend on it may be built against placeholders. Only the human's conf
 `set-status <id> done --human-confirmed`, which the lead runs only after the human says the step is done.
 Notes with quotes, backticks or $(...): `tasks.py log <id> - <<'EOF'` ... `EOF` (the text comes from stdin).
 Script tasks: "runner": "script" plus "check" (a list of commands) are run by run_checks.py with no model at all.
+"verify" (a list of commands): run_checks.py verify <id> checks a built task with no model when its changes touch no
+app code. metadata.goal / metadata.non_goals: the PRD's goal and non-goals, printed by show (set them with meta).
+`close <id>` is the whole close-out after verification: log, done, render TASKS.md, stage, commit, push.
 """
 import argparse
 import datetime
 import json
 import os
 import shlex
+import subprocess
 import sys
 
 DEFAULT_FILE = ".taskmaster/tasks/tasks.json"
@@ -203,14 +207,17 @@ def check_problems(item, fid):
     chk = item.get("check")
     if r == "script" and status_of(item) not in ("cancelled", "deferred", "done") and not chk:
         out.append(f"{fid}: runner is script but there is no check (the commands the script runs)")
-    if chk is not None:
-        if not isinstance(chk, list):
-            out.append(f"{fid}: check must be a list of commands")
-        else:
-            for c in chk:
-                _, _, prob = norm_check(c)
-                if prob:
-                    out.append(f"{fid}: check: {prob}")
+    for field in ("check", "verify"):
+        cmds = item.get(field)
+        if cmds is None:
+            continue
+        if not isinstance(cmds, list):
+            out.append(f"{fid}: {field} must be a list of commands")
+            continue
+        for c in cmds:
+            _, _, prob = norm_check(c)
+            if prob:
+                out.append(f"{fid}: {field}: {prob}")
     return out
 
 
@@ -426,6 +433,9 @@ def validate(tasks, meta=None):
     for n in graph:
         visit(n, [])
 
+    if tasks and not str(meta.get("goal") or "").strip():
+        warns.append("metadata.goal is empty: `tasks.py meta --goal '...' --non-goal '...'` from the PRD "
+                     "(agents read it in `tasks.py show` instead of opening the PRD)")
     inprog = [str(t["id"]) for t in tasks if status_of(t) == "in-progress"]
     if len(inprog) > 1:
         warns.append(f"{len(inprog)} tasks in progress ({', '.join(inprog)}): finish or defer before starting more")
@@ -563,7 +573,10 @@ def cmd_next(a):
         print(f"nothing workable{where}: all tasks are done, or what's left is blocked")
         sys.exit(1)
     parent, item = nxt
-    print(line(item, parent))
+    if a.details:
+        print_details(data, a.tag, tasks, item, parent)
+    else:
+        print(line(item, parent))
     if parent:
         print(f"  part of task {parent['id']}: {parent.get('title', '')}")
     if not parent and (item.get("complexity") or 0) >= 7 and not item.get("subtasks"):
@@ -572,15 +585,25 @@ def cmd_next(a):
         print("  HUMAN STEP: only the human can do this. Escalate as HUMAN NEEDED with exact instructions.")
     elif runner_of(item, parent) == "script":
         print(f"  SCRIPT TASK: no builder. Run: python .taskmaster/run_checks.py run --only {full_id(item, parent)}")
-    print(f"  show details: tasks.py show {full_id(item, parent)}")
+    if not a.details:
+        print(f"  show details: tasks.py show {full_id(item, parent)}")
 
 
 def cmd_show(a):
     data = load(a.file, a.tag)
     tasks = data[a.tag]["tasks"]
     item, parent = find(tasks, a.id)
+    print_details(data, a.tag, tasks, item, parent)
+
+
+def print_details(data, tag, tasks, item, parent):
+    meta = meta_of(data, tag)
     done = done_ids(tasks)
     print(line(item, parent))
+    if meta.get("goal"):
+        print(f"goal: {' '.join(str(meta['goal']).split())}")
+    if meta.get("non_goals"):
+        print("non-goals: " + "; ".join(str(x) for x in meta["non_goals"]))
     print(f"status: {status_of(item)}")
     top = parent or item
     if phase_of(top) is not None:
@@ -595,6 +618,8 @@ def cmd_show(a):
         for c in item.get("check") or []:
             argv, cwd, _ = norm_check(c)
             print("  check: " + " ".join(argv or [str(c)]) + (f"   (in {cwd})" if cwd != "." else ""))
+    if item.get("verify"):
+        print(f"verify: free (python .taskmaster/run_checks.py verify {full_id(item, parent)}) if no app code changed")
     if item.get("description"):
         print(f"description: {item['description']}")
     deps = deps_of(item, parent)
@@ -698,6 +723,8 @@ def cmd_add(a):
         new["review"] = True
     if a.runner:
         new["runner"] = a.runner
+    if a.verify:
+        new["verify"] = [split_args(c) for c in a.verify]
     if a.check:
         new["check"] = [split_args(c) for c in a.check]
         if not a.test:
@@ -749,6 +776,94 @@ def cmd_queue(a):
     print(f"{a.id} queued for the human; dependent tasks are now workable")
 
 
+def cmd_meta(a):
+    data = load(a.file, a.tag)
+    meta = meta_of(data, a.tag)
+    if a.goal is None and a.non_goal is None:
+        print(f"goal: {meta.get('goal') or '(not set)'}")
+        print("non-goals: " + ("; ".join(meta.get("non_goals") or []) or "(not set)"))
+        return
+    if a.goal is not None:
+        meta["goal"] = " ".join(a.goal.split())
+    if a.non_goal is not None:
+        meta["non_goals"] = [" ".join(x.split()) for x in a.non_goal if x.strip()]
+    save(a.file, data, a.tag)
+    print("metadata updated: goal and non-goals are printed by tasks.py show")
+
+
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+
+def default_branches():
+    names = {"main", "master"}
+    r = git("symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD")
+    if r.returncode == 0 and r.stdout.strip():
+        names.add(r.stdout.strip().split("/", 1)[-1])
+    return names
+
+
+def cmd_close(a):
+    """After the verifier (and reviewer) passed: log, mark done, render TASKS.md, stage, commit, push."""
+    data = load(a.file, a.tag)
+    tasks = data[a.tag]["tasks"]
+    item, parent = find(tasks, a.id)
+    fid = full_id(item, parent)
+    if item.get("human") or (parent or {}).get("human"):
+        die(f"{fid} is a human step: only the human closes it (the lead runs set-status --human-confirmed)")
+    branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if not branch or branch == "HEAD":
+        die("not on a branch (git rev-parse failed or detached HEAD)")
+    if branch in default_branches():
+        die(f"on the default branch ({branch}): tasks are committed on a phase branch, never the default branch")
+    if status_of(item) != "done":
+        miss = unmet(item, parent, met_ids(tasks))
+        if miss:
+            die(f"{fid} has unmet dependencies: {', '.join(miss)}")
+        if not parent:
+            open_subs = [full_id(s, item) for s in item.get("subtasks", []) if open_status(s)]
+            if open_subs:
+                die(f"{fid} still has open subtasks: {', '.join(open_subs)}")
+        who = "script check, no model" if a.tier == "script" else f"done by {a.tier}"
+        if a.escalated_from:
+            who += f", escalated from {a.escalated_from}"
+        entry = f"[{now()}] {who}; verified" + (f" ({a.note})" if a.note else "")
+        item["details"] = (item.get("details", "").rstrip() + "\n\n" + entry).lstrip("\n")
+        item["status"] = "done"
+        save(a.file, data, a.tag)
+    here = os.path.dirname(os.path.abspath(__file__))
+    r = subprocess.run([sys.executable, os.path.join(here, "render_tasks_md.py")], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        die(f"render_tasks_md.py failed: {(r.stderr or r.stdout).strip()[-300:]}")
+    files = [f.strip() for f in (a.files or "").split(",") if f.strip()]
+    tm_dir = os.path.relpath(os.path.dirname(os.path.dirname(os.path.abspath(a.file))))
+    r = git("add", "-A", "--", *files, tm_dir, "TASKS.md")
+    if r.returncode != 0:
+        die(f"git add failed: {r.stderr.strip()[-300:]}")
+    left = [ln[3:] for ln in git("status", "--porcelain", "--untracked-files=all").stdout.splitlines()
+            if ln[:2] == "??" or ln[1] in "MD"]
+    if left:
+        print(f"not committed: these changes aren't in --files: {', '.join(left[:15])}")
+        print(f"If the task made them, run close again with them in --files; if not, delete or restore them. "
+              f"{fid} is marked done; nothing was committed.")
+        sys.exit(3)
+    title = " ".join(str(item.get("title", "")).split())
+    msg = f"task {fid}: {title}" + (" (script check)" if a.tier == "script" else "")
+    if a.trailer:
+        msg += "\n\n" + "\n".join(a.trailer)
+    r = git("commit", "-q", "-m", msg)
+    if r.returncode != 0 and "nothing to commit" not in (r.stdout + r.stderr):
+        die(f"git commit failed: {(r.stderr or r.stdout).strip()[-300:]}")
+    sha = git("rev-parse", "--short", "HEAD").stdout.strip()
+    if git("remote", "get-url", "origin").returncode != 0:
+        pushed = "not pushed (no origin remote)"
+    else:
+        p = git("push", "-q", "-u", "origin", "HEAD")
+        pushed = "pushed" if p.returncode == 0 else f"PUSH FAILED (commit is safe locally): {p.stderr.strip()[-200:]}"
+    print(f"closed {fid}: done, TASKS.md rendered, committed {sha} on {branch}, {pushed}")
+
+
 def cmd_validate(a):
     data = load(a.file, a.tag)
     errors, warns = validate(data[a.tag]["tasks"], meta_of(data, a.tag))
@@ -783,6 +898,7 @@ def main():
     sp.set_defaults(fn=cmd_list)
     sp = sub.add_parser("next")
     sp.add_argument("--phase", type=int, help="only consider tasks in this phase")
+    sp.add_argument("--details", action="store_true", help="also print what `show` prints (saves a call)")
     sp.set_defaults(fn=cmd_next)
     sp = sub.add_parser("show")
     sp.add_argument("id")
@@ -813,12 +929,28 @@ def main():
     sp.add_argument("--human", action="store_true", help="only the human can do this task")
     sp.add_argument("--review", action="store_true", help="reviewer agent must approve after the verifier")
     sp.add_argument("--runner", choices=list(RUNNERS), help="script = run_checks.py runs it, no model")
+    sp.add_argument("--verify", action="append", help="a command that proves the built task works, e.g. "
+                    "\"pytest -q tests/test_x.py\" (repeatable; run free by run_checks.py verify when no app code "
+                    "changed)")
     sp.add_argument("--check", action="append", help="a command the script runs, e.g. \"ruff check .\" "
                     "(repeatable; no shell operators; for a cwd, edit tasks.json: {\"cmd\": [...], \"cwd\": \"dir\"})")
     sp.set_defaults(fn=cmd_add)
     sp = sub.add_parser("queue", help="queue a human task: it stays open, dependents become workable")
     sp.add_argument("id")
     sp.set_defaults(fn=cmd_queue)
+    sp = sub.add_parser("close", help="after verification: log, done, render, stage, commit, push in one call")
+    sp.add_argument("id")
+    sp.add_argument("--tier", required=True, choices=["haiku", "sonnet", "opus", "script", "lead"],
+                    help="who built it (script = a free script task)")
+    sp.add_argument("--escalated-from", choices=["haiku", "sonnet", "opus"])
+    sp.add_argument("--files", help="the builder's FILES CHANGED, comma-separated (new and deleted files too)")
+    sp.add_argument("--note", help="short extra text for the log line")
+    sp.add_argument("--trailer", action="append", help="a commit message trailer line, e.g. Co-Authored-By: ...")
+    sp.set_defaults(fn=cmd_close)
+    sp = sub.add_parser("meta", help="show or set the PRD goal and non-goals that `show` prints")
+    sp.add_argument("--goal")
+    sp.add_argument("--non-goal", action="append", help="repeatable; replaces the whole list")
+    sp.set_defaults(fn=cmd_meta)
     sub.add_parser("validate").set_defaults(fn=cmd_validate)
 
     a = p.parse_args()

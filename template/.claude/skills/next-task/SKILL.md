@@ -1,6 +1,6 @@
 ---
 name: next-task
-description: The per-task procedure - route one task from .taskmaster to the cheapest capable builder (haiku, then sonnet, then opus), verify with a different agent, escalate between builders on failure, then log, mark done and commit. Preloaded by the phase-runner, which loops it over a whole phase. A human can also run /next-task <id> for a single task.
+description: The per-task procedure - route one task from .taskmaster to the cheapest capable builder (haiku, then sonnet, then opus), verify it (free by script when no app code changed, else a different agent), escalate between builders on failure, then close it out with one command. Preloaded by the phase-runner, which loops it over a whole phase. A human can also run /next-task <id> for a single task.
 argument-hint: "[task-id]"
 ---
 
@@ -8,17 +8,18 @@ argument-hint: "[task-id]"
 
 Whoever runs this (normally the **phase-runner**) plans, routes, verifies and records. **You don't write app
 code**; builders do. (Exception: a one-line fix the verifier pinpointed exactly, such as a wrong import. Log it.)
-Task id: `$ARGUMENTS` if given, else `python .taskmaster/tasks.py next`.
+Task id: `$ARGUMENTS` if given (then `tasks.py show <id>`), else `python .taskmaster/tasks.py next --details`.
 
 ## 1. Look at it
-`python .taskmaster/tasks.py show <id>`: description, phase, complexity, flags, testStrategy, the end of the log.
-Don't open source files. Flag `human` → not a builder task; see the phase-runner's rules.
+`next --details` (or `show`) prints everything in one call: the PRD goal and non-goals, description, phase,
+complexity, flags, testStrategy, verify, the log. Don't open source files or the PRD. Flag `human` → not a builder
+task; see the phase-runner's rules.
 
 ## 1b. Script tasks (free checks)
 `show` prints `runner: script` → the task is only commands that need no judgment (lint, type check, tests, build,
 CI status). Don't dispatch a builder or the verifier. Run `python .taskmaster/run_checks.py run --only <id>`:
-- **exit 0** → it already logged and marked the task done. Do close-out steps 4-5 only (render, commit
-  `task <id>: <title> (script check)`), then go on.
+- **exit 0** → it already logged and marked the task done. `python .taskmaster/tasks.py close <id> --tier script`
+  (renders, commits `task <id>: <title> (script check)`, pushes), then go on.
 - **exit 1** → a check failed and the status is unchanged; the command and its last lines were printed, the full
   record is in `.claude/tmp/checks/<id>.log`. The code needs fixing: route by complexity (section 3) with
   `Task <id>: its script check failed. Read .claude/tmp/checks/<id>.log and fix the cause. Don't edit
@@ -57,8 +58,15 @@ Task <id>: <title>. Build exactly this task, run its testStrategy, reply in your
 [On verifier/reviewer failure:] Findings to fix: <their PROBLEMS/FINDINGS, verbatim>.
 ```
 
-## 4. Verify with a different agent (always)
-- Builder DONE → **verifier**: "Verify task <id>."
+## 4. Verify (always; free when no app code changed)
+- Builder DONE and the task has `verify` commands → first `python .taskmaster/run_checks.py verify <id>` (no
+  model). It runs only when every uncommitted change is docs, tests or the plan (`safe_paths` in harness.json):
+  - exit 0 → PASS. No verifier.
+  - exit 1 → a FAIL: its printed lines are the findings for the ladder (section 5).
+  - exit 2 → fix the task's `verify` commands (log why), then use the verifier agent this time.
+  - exit 3 → app code changed (or no verify commands): use the **verifier** agent. Anything that writes app code
+    always gets the verifier.
+- Otherwise builder DONE → **verifier**: "Verify task <id>."
 - Task flagged `review`, or `git diff --name-only` (plus new files) touches a path under "Risky paths" in CLAUDE.md
   → after a verifier PASS, also **reviewer**: "Review task <id>."
 - MANUAL CHECK NEEDED (or the builder listed a MANUAL CHECK) with everything automatic passing: don't stop.
@@ -83,13 +91,12 @@ reviewer says CHANGES NEEDED, or the builder hit maxTurns (partial output).
 1. Drift check, in your head: does the result match the task and the PRD goal? If a builder's report shows a later
    task is now wrong, `tasks.py log <later-id> 'note from <id>: ...'`. Scope changes are an escalation, not an edit.
 2. Builder IDEAS → one dated line each in `.taskmaster/docs/parking-lot.md`.
-3. `python .taskmaster/tasks.py log <id> 'done by <tier>[, escalated from <tier>]; verified'`
-4. `python .taskmaster/tasks.py set-status <id> done && python .taskmaster/render_tasks_md.py` (never for a
-   human task: those are queued, and tasks.py refuses to close them without the human's confirmation)
-5. Stage the builder's FILES CHANGED plus `.taskmaster/` and `TASKS.md`, then `git status --short`: nothing the
-   task created may stay untracked. `git commit -q -m "task <id>: <short title>"` (add your environment's
-   attribution lines if it asks for them), then `git push -q -u origin HEAD` as a backup. The PR and merge happen
-   at phase end through the `deliver` skill, not here.
-6. Keep a running tally for the end-of-phase report (tier, first try or escalated). Don't update memory.md per
+3. One command does the rest (log `done by <tier>; verified`, mark done, render TASKS.md, stage, commit
+   `task <id>: <title>`, push as a backup):
+   `python .taskmaster/tasks.py close <id> --tier <haiku|sonnet|opus> [--escalated-from <tier>] --files <FILES CHANGED, comma-separated>`
+   Add `--trailer '<line>'` for each attribution line your environment asks for. Exit 3 = changes not in
+   `--files`: if the task made them, run it again with them added; if not, restore or delete them. It refuses
+   human tasks and the default branch. The PR and merge happen at phase end through `deliver`, not here.
+4. Keep a running tally for the end-of-phase report (tier, first try or escalated). Don't update memory.md per
    task; the phase-runner does it once at the end.
-7. No progress message. Go straight to the next task.
+5. No progress message. Go straight to the next task.

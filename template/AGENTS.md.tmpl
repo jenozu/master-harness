@@ -6,7 +6,8 @@ This repo is built task by task from a written plan. Follow this loop exactly; i
 drifting away from the plan.
 
 ## Where the plan lives
-- `.taskmaster/docs/prd.md`: goal, non-goals, success criteria, stack, decision log. Read Goal and Non-goals every session.
+- `.taskmaster/docs/prd.md`: goal, non-goals, success criteria, stack, decision log. `tasks.py show` prints the
+  goal and non-goals; open the PRD when a task needs more.
 - `.taskmaster/tasks/tasks.json`: phases, tasks, subtasks, status, dependencies, test strategy, work log. Source of truth.
 - `.taskmaster/docs/parking-lot.md`: ideas that are NOT in the plan.
 - `.taskmaster/docs/manual-checks.md`: checks waiting for a human or an agent with a running app.
@@ -15,7 +16,7 @@ drifting away from the plan.
 
 Helper (Python stdlib only), from the repo root, in bash (on Windows: Git Bash, not PowerShell):
 ```
-python .taskmaster/tasks.py status | phase [n] | next [--phase n] | show <id>
+python .taskmaster/tasks.py status | phase [n] | next [--phase n] [--details] | show <id>
 python .taskmaster/tasks.py set-status <id> in-progress|done|deferred|cancelled
 python .taskmaster/tasks.py log <id> 'plan: ...'     # timestamped note (single quotes; or `- <<'EOF'` for any text)
 python .taskmaster/tasks.py add --help               # add a task or subtask
@@ -24,7 +25,7 @@ python .taskmaster/render_tasks_md.py                # refresh TASKS.md
 ```
 
 ## Work loop (one task at a time)
-1. `tasks.py next`, then `tasks.py show <id>`. Complexity 7+ without subtasks: split it into 3-5 subtasks first.
+1. `tasks.py next --details` (task, goal and non-goals in one call). Complexity 7+ without subtasks: split it into 3-5 subtasks first.
 2. Read the code the task touches. Log your plan: `tasks.py log <id> 'plan: files X, Y; approach ...'`.
 3. `tasks.py set-status <id> in-progress`, build it, log what worked and what failed.
 4. Run the task's testStrategy for real. Not done until it passes.

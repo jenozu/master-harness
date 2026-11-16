@@ -11,7 +11,8 @@ A reusable Claude Code setup that turns a PRD into a project Claude can build ph
   it also waits while your steps (migrations, env values) or eyes-on checks are open, and for PRs with no CI.
   Changes to the merge rules, harness scripts or CI always wait for you.
 - **Free checks:** tasks that are only commands (lint, tests, build, each phase's final gate) run from a plain
-  script with no model at all. A model is called only when one fails.
+  script with no model at all. A model is called only when one fails. Built tasks that only touch docs or tests
+  are verified the same way; anything touching app code still gets the verifier agent.
 - A **Taskmaster plan** in git (`.taskmaster/`) holds the phases, tasks, and work log, plus a small
   **memory.md**, so any session on any device picks up where the last one stopped.
 

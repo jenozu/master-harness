@@ -49,11 +49,12 @@ Ask only when the answer changes phase 0 or the stack, for example:
   that deploys on push to the default branch. Real users or payments make it matter more.
 Everything else → assume, record it, move on.
 
-## 4. Check the Claude Code docs
-Fetch https://code.claude.com/docs/en/sub-agents.md and https://code.claude.com/docs/en/skills.md (WebFetch). Confirm
-the frontmatter fields used by the template's agents and skills are still supported, and compare against
-`AGENT_FIELDS` / `SKILL_FIELDS` in `.harness-tmp/template/.claude/scripts/check_harness.py`. If a field was
-renamed or removed, adapt the installed copies and tell the human in the report so the template can be updated.
+## 4. Claude Code docs: only when the check flags a field
+Skip this step unless step 10's `check_harness.py` reports an `unknown agent field` or `unknown skill field`. Then
+have a Sonnet subagent fetch https://code.claude.com/docs/en/sub-agents.md and
+https://code.claude.com/docs/en/skills.md and report whether that field was renamed or removed; adapt the
+installed copies and tell the human in the report so the template (`AGENT_FIELDS` / `SKILL_FIELDS`) can be
+updated.
 
 ## 5. Choose library pieces
 First, is the owner's VPS kit set up on this computer? `cat ~/.claude/vps.json 2>/dev/null` and
@@ -126,7 +127,8 @@ CLAUDE.md if it was left for now, and `python .taskmaster/render_tasks_md.py`.
 git add -A
 python .claude/scripts/check_harness.py --no-git
 ```
-Fix every ERROR. Look at every warn (path-scoped rules that match nothing yet are fine in an empty repo). Also:
+Fix every ERROR (an unknown agent or skill field: see step 4). Look at every warn (path-scoped rules that match
+nothing yet are fine in an empty repo). Also:
 `python .taskmaster/tasks.py phase` looks right, `tasks.py next` returns task 1, and every PRD capability maps to
 a task (build the table for the report).
 

@@ -397,7 +397,7 @@ class ScriptChecks(unittest.TestCase):
         src = (ROOT / "template/.taskmaster/run_checks.py").read_text(encoding="utf-8")
         mods = {n.names[0].name.split(".")[0] for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Import)}
         mods |= {n.module.split(".")[0] for n in ast.walk(ast.parse(src)) if isinstance(n, ast.ImportFrom)}
-        self.assertLessEqual(mods, {"argparse", "datetime", "hashlib", "json", "os", "shutil", "subprocess",
+        self.assertLessEqual(mods, {"argparse", "datetime", "hashlib", "json", "os", "re", "shutil", "subprocess",
                                     "sys", "time", "pathlib", "tasks"})
 
 
