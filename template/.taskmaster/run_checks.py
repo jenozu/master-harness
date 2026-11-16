@@ -6,6 +6,7 @@ build, a smoke script). This script runs them directly, so they cost zero tokens
 
   python .taskmaster/run_checks.py plan [--phase N]          list open script tasks in order; runs nothing
   python .taskmaster/run_checks.py run [--phase N] [--only ID] [--from ID]
+  python .taskmaster/run_checks.py verify ID                 free verification of a built task (see below)
 
 `run` goes through the open script tasks in dependency order. A task passes only when every command exits with
 its expected code (default 0); then it is logged and marked done through tasks.py. The first failure stops the
@@ -14,6 +15,12 @@ run, leaves the status alone and prints the failing command with the last lines 
 Exit codes: 0 all good (or nothing to run), 1 a check failed (the code needs fixing: send a builder),
 2 refused or not runnable: off the allowlist, a shell operator, waiting on a dependency, the program isn't
 installed or the command timed out (the plan, checks.json or the machine needs fixing: not a builder job).
+
+`verify ID`: a task a builder built, with "verify" commands, is checked with no model when the uncommitted changes
+touch no app code: every changed file must match safe_paths (and not never_auto_paths) in .claude/harness.json as
+committed at HEAD (docs, tests, the plan). Exit 0 verified (logged; close-out still runs), 1 a command failed (a
+verifier FAIL: back to the builder ladder), 2 not runnable (fix the verify commands), 3 use the verifier agent
+(no verify commands, or app code changed).
 
 Safety: commands are argument lists run without a shell. Each must start with an entry in the allowlist in
 .taskmaster/checks.json ("pytest", or a prefix such as "npm run"); anything else is refused. Output never goes
@@ -24,6 +31,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -99,6 +107,54 @@ def script_items(data, tag, phase=None):
             ordered += [x for x in found if x[0] not in placed]
             break
     return ordered
+
+
+def glob_re(pattern):
+    """Path glob to regex: ** = any folders, * = within one folder, ? = one character (same as merge_gate.py)."""
+    i, rx = 0, ""
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            rx, i = rx + "(?:.*/)?", i + 3
+        elif pattern.startswith("**", i):
+            rx, i = rx + ".*", i + 2
+        elif pattern[i] == "*":
+            rx, i = rx + "[^/]*", i + 1
+        elif pattern[i] == "?":
+            rx, i = rx + "[^/]", i + 1
+        else:
+            rx, i = rx + re.escape(pattern[i]), i + 1
+    return re.compile(rx + r"\Z")
+
+
+def git_out(*args):
+    r = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return r.stdout if r.returncode == 0 else None
+
+
+def changed_files():
+    """Uncommitted changes, new files included (a builder doesn't commit; close does)."""
+    out = git_out("status", "--porcelain", "--untracked-files=all")
+    if out is None:
+        return None
+    files = []
+    for ln in out.splitlines():
+        path = ln[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        files.append(path.strip('"'))
+    return files
+
+
+def app_files(files):
+    """Files that count as app code: not in safe_paths of the committed harness.json (a builder can't widen it)."""
+    raw = git_out("show", "HEAD:.claude/harness.json")
+    try:
+        cfg = json.loads(raw) if raw else {}
+    except ValueError:
+        cfg = {}
+    safe = [glob_re(p) for p in cfg.get("safe_paths", [])]
+    never = [glob_re(p) for p in cfg.get("never_auto_paths", [])]
+    return [f for f in files if not any(r.match(f) for r in safe) or any(r.match(f) for r in never)]
 
 
 def tail(text, n):
@@ -280,6 +336,59 @@ def cmd_run(a):
     return 0
 
 
+def cmd_verify(a):
+    cfg = load_config()
+    n = int(cfg.get("tail_lines", 20))
+    data = tm.load(a.file, a.tag)
+    item, parent = tm.find(data[a.tag]["tasks"], a.id)
+    fid = tm.full_id(item, parent)
+    cmds = item.get("verify") or []
+    if not cmds:
+        print(f"use the verifier agent: {fid} has no verify commands")
+        return 3
+    files = changed_files()
+    if files is None:
+        print("use the verifier agent: git status failed")
+        return 3
+    app = app_files(files)
+    if app:
+        more = f" (+{len(app) - 8} more)" if len(app) > 8 else ""
+        print(f"use the verifier agent: app code changed: {', '.join(app[:8])}{more}")
+        return 3
+    prepared = []
+    for entry in cmds:
+        argv, cwd, prob = problem(entry, cfg["allow"])
+        if prob:
+            print(f"refused: task {fid} verify: {prob}. Fix the task's verify commands, then use the verifier agent.")
+            return 2
+        ent = entry if isinstance(entry, dict) else {}
+        prepared.append((argv, cwd, int(ent.get("expect", 0)), int(ent.get("timeout", cfg["timeout_seconds"]))))
+    results = []
+    for argv, cwd, expect, timeout in prepared:
+        r = run_one(argv, cwd, expect, timeout, int(cfg.get("retries_on_timeout", 0)))
+        results.append(r)
+        if not r["ok"]:
+            break
+    r = results[-1]
+    if not r["ok"]:
+        log = write_log(f"{fid}.verify", item, results, "FAIL", n)
+        if r.get("missing") or r.get("timed_out"):
+            print(f"not runnable: `{r['cmd']}` " + ("is not installed" if r.get("missing") else "timed out")
+                  + f". Use the verifier agent. Record: {log}")
+            return 2
+        tasks_cmd(a, "log", fid, f"free verification FAILED: `{r['cmd']}` exit {r['exit']}; details in {log}")
+        print(f"FAIL (verify) task {fid}: `{r['cmd']}` -> exit {r['exit']}, expected {r['expect']}")
+        print(f"--- last {n} lines of stdout ---\n{tail(r['stdout'], n)}")
+        print(f"--- last {n} lines of stderr ---\n{tail(r['stderr'], n)}")
+        print(f"Treat it as a verifier FAIL: these lines are the findings for the next builder. Record: {log}")
+        return 1
+    write_log(f"{fid}.verify", item, results, "PASS", n)
+    tasks_cmd(a, "log", fid, f"verified by script: {len(results)} command(s), no app code changed, no model used")
+    print(f"PASS (verify) task {fid}: {len(results)} command(s); changed files are all docs/tests/plan. "
+          f"Close it out (no verifier needed).")
+    return 0
+
+
 def main():
     for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252: never crash on "→" or "·"
         if hasattr(stream, "reconfigure"):
@@ -297,6 +406,9 @@ def main():
     g.add_argument("--only", help="run just this task id")
     g.add_argument("--from", dest="from_id", help="start at this task id")
     sp.set_defaults(fn=cmd_run)
+    sp = sub.add_parser("verify", help="free verification of a built task whose changes touch no app code")
+    sp.add_argument("id")
+    sp.set_defaults(fn=cmd_verify)
     a = p.parse_args()
     sys.exit(a.fn(a))
 

@@ -382,8 +382,9 @@ class Instructions(unittest.TestCase):
     def test_f9_no_one_phase_per_launch_wording(self):
         self.assertNotIn("One phase per launch", self.read("template/CLAUDE.md.tmpl"))
         self.assertNotIn("Do this between phases", self.read("README.md"))
-        cl = self.read("CHANGELOG.md").split("\n## ")[1]  # the newest section
-        self.assertTrue(cl.startswith("2.1.2"), cl[:20])
+        sections = self.read("CHANGELOG.md").split("\n## ")
+        cl = next((x for x in sections if x.startswith("2.1.2")), "")
+        self.assertTrue(cl, "CHANGELOG has a 2.1.2 section")
         self.assertIn("CLAUDE.md", cl.split("Project action")[1])
 
     def test_f9_checker_warns_about_an_old_claude_md(self):
@@ -646,8 +647,8 @@ class UpgradeFromEveryVersion(unittest.TestCase):
             tar = work / "old.tar"
             with open(tar, "wb") as fh:
                 subprocess.run(["git", "-C", str(ROOT), "archive", "--format=tar", commit], stdout=fh, check=True)
-            with tarfile.open(tar) as tf:
-                tf.extractall(old)
+            with tarfile.open(tar) as tf:  # our own git history: trusted; "data" filter where available
+                tf.extractall(old, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
             git(proj, "init", "-q")
             env = dict(os.environ, PYTHONIOENCODING="utf-8")  # old installers predate the cp1252 fix
             fx = old / "tests/fixtures/sample"

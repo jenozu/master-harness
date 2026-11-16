@@ -14,9 +14,9 @@ color: blue
 The phase-runner gives you ONE task or subtask id from `.taskmaster/tasks/tasks.json`. Build exactly that, nothing else.
 
 ## Steps
-1. `python .taskmaster/tasks.py show <id>`. Read the description, details, testStrategy and the work log
-   (earlier attempts may have failed; their notes say what not to do). Skim the Goal and Non-goals in
-   `.taskmaster/docs/prd.md`.
+1. `python .taskmaster/tasks.py show <id>`. Read the goal and non-goals at the top (never build a non-goal), the
+   description, details, testStrategy and the work log (earlier attempts may have failed; their notes say what not
+   to do). Open the PRD only if the task says to.
 2. Read the files the task names before changing them. Search with Grep/Glob; don't guess file contents.
 3. `python .taskmaster/tasks.py log <id> 'plan (<your model>): <files> - <approach>'`, then
    `python .taskmaster/tasks.py set-status <id> in-progress`.
@@ -32,7 +32,7 @@ The phase-runner gives you ONE task or subtask id from `.taskmaster/tasks/tasks.
 
 ## Hard limits
 - Don't mark the task `done`, commit, push or deploy. The phase-runner does that after verification.
-- Don't edit `.taskmaster/docs/prd.md` or other tasks. Don't touch files outside the task's scope. If the task truly
+- Don't edit the PRD or other tasks. Don't touch files outside the task's scope. If the task truly
   needs it, stop and report BLOCKED with the reason.
 - New ideas go in your report under IDEAS, not in the code.
 - Stuck = the same error twice after a real fix attempt, or you'd need to guess an API you can't verify. Don't

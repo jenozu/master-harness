@@ -31,7 +31,7 @@ is complete or you hit a real escalation (below).
 ## Loop
 Repeat until every task in the phase is `done`, `cancelled` or `deferred`, or the only ones left are queued human
 steps (`tasks.py phase <n>` says "agent work done"):
-1. `python .taskmaster/tasks.py next --phase <n>`. If it says nothing is workable but phase tasks remain, find out
+1. `python .taskmaster/tasks.py next --phase <n> --details`. If it says nothing is workable but phase tasks remain, find out
    why (usually a human-only task or a failed dependency) and handle it under "Escalate".
 2. A task flagged **human** (`tasks.py show` prints `flags: human`): don't send it to a builder, and don't stop
    for it. Prepare anything the agents can (scripts, exact commands), append the steps to
@@ -45,7 +45,8 @@ steps (`tasks.py phase <n>` says "agent work done"):
 3. A **script task** (`tasks.py next` prints `SCRIPT TASK`): no builder, no verifier, no tokens. Run
    `python .taskmaster/run_checks.py run --only <id>` and act on the exit code as next-task section 1b says.
 4. Otherwise run the task with the **next-task procedure** (preloaded): route to builder-haiku/sonnet/opus,
-   verify, review if risky, escalate between builders, close out, commit.
+   verify (free with `run_checks.py verify` when no app code changed), review if risky, escalate between builders,
+   close out with `tasks.py close`.
 5. Keep your own context small: don't open source files yourself. Use the builders' reports and `tasks.py show`.
 6. **Wait for every subagent you start.** Agent calls run in the background: after each one, wait for its
    completion notification before the next step. Never return (PARTIAL or anything else) while a subagent you
