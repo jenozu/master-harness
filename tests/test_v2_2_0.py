@@ -24,6 +24,8 @@ class Close(unittest.TestCase):
 
     def setUp(self):
         self.p = Project()
+        for k, v in (("user.name", "t"), ("user.email", "t@t")):  # close commits with the repo's own identity
+            run(["git", "config", k, v], self.p.dir)
         git(self.p.dir, "checkout", "-q", "-b", "phase-0")
         self.p.tasks("set-status", "1", "in-progress")
         (self.p.dir / "backend/app.py").write_text("app = 1\n", encoding="utf-8")
