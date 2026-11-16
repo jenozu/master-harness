@@ -38,6 +38,8 @@ SEEDED = {
     ".taskmaster/docs/human-checklist.md", ".taskmaster/checks.json",
     ".claude/harness.json", ".claude/rules/project.md",
 }
+# Rules an older harness put in settings.json that upgrades take out again (merging otherwise only adds).
+RETIRED_RULES = {"allow": ["Bash(curl -s *)", "Bash(curl -fsS *)"]}  # 2.1.2: curl now asks (it can send data out)
 GITIGNORE_LINES = [
     ".env", ".env.*", "!.env.example",
     ".claude/settings.local.json", ".claude/deploy-target",
@@ -274,7 +276,8 @@ def upgrade(a, plan, values):
                 names = split(a.settings)
                 if "Bash" in cur.get("permissions", {}).get("allow", []) and "open" not in names:
                     names.append("open")  # project already runs open: keep upgrades from re-adding the ask rules
-                merged = settings_with_fragments(names, merge_settings(cur, settings_with_fragments([])))
+                base = merge_settings(cur, {"remove": RETIRED_RULES})
+                merged = settings_with_fragments(names, merge_settings(base, settings_with_fragments([])))
                 if merged != cur:
                     plan.write(dst, json.dumps(merged, indent=2) + "\n")
                     plan.notes.append("settings.json: added new harness permissions/env (nothing removed)")
@@ -338,9 +341,10 @@ def changelog_actions(old):
         grab = []
         for line in lines:
             if line.startswith("- "):
-                grab = [line] if line.lower().startswith("- project action") else []
+                plain = line.replace("**", "")
+                grab = [line] if plain.lower().startswith("- project action") else []
                 if grab:
-                    out.append(f"[{ver}] {line[2:]}")
+                    out.append(f"[{ver}] {plain[2:]}")
             elif grab and line.startswith("  "):
                 out.append("      " + line.strip())
     return out

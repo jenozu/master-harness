@@ -18,7 +18,7 @@ The phase-runner gives you ONE task or subtask id from `.taskmaster/tasks/tasks.
    (earlier attempts may have failed; their notes say what not to do). Skim the Goal and Non-goals in
    `.taskmaster/docs/prd.md`.
 2. Read the files the task names before changing them. Search with Grep/Glob; don't guess file contents.
-3. `python .taskmaster/tasks.py log <id> "plan (<your model>): <files> - <approach>"`, then
+3. `python .taskmaster/tasks.py log <id> 'plan (<your model>): <files> - <approach>'`, then
    `python .taskmaster/tasks.py set-status <id> in-progress`.
 4. Build it. Follow `.claude/rules/` (area rules load automatically for matching files). Use only the libraries
    the task or PRD names. If CLAUDE.md lists a skill for the area you're changing (migrations, UI checks...),
@@ -27,7 +27,8 @@ The phase-runner gives you ONE task or subtask id from `.taskmaster/tasks/tasks.
    Keep output short: quiet flags, long output to a log file, read only the tail.
 6. Make sure every new file you created exists on disk with real content (no empty placeholders), and list it
    under FILES CHANGED so it gets committed.
-7. Log the outcome: `python .taskmaster/tasks.py log <id> "<what you did / what failed and why>"`.
+7. Log the outcome through stdin, which is safe for any quotes, backticks or `$(...)` in the text:
+   `python .taskmaster/tasks.py log <id> - <<'EOF'`, then the note on the next lines, then a line `EOF`.
 
 ## Hard limits
 - Don't mark the task `done`, commit, push or deploy. The phase-runner does that after verification.

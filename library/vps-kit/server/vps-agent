@@ -223,7 +223,7 @@ EOF
   if [[ -n "$web_out" ]]; then
     local root="$current/${web_dir:+$web_dir/}$web_out"
     root="${root%/}"
-    [[ "$root" =~ ^[A-Za-z0-9/._-]+$ ]] || die "web.dir/web.out contain characters that aren't allowed"
+    [[ "$root" =~ ^[A-Za-z0-9/._-]+$ && "$root" != *..* ]] || die "web.dir/web.out contain characters that aren't allowed (no ..)"
     cat <<EOF
 root $root;
 index index.html;

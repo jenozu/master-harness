@@ -18,7 +18,7 @@ PY = sys.executable
 
 
 def run(args, cwd, check=True):
-    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if check and r.returncode != 0:
         raise AssertionError(f"{args} failed ({r.returncode}):\n{r.stdout}\n{r.stderr}")
     return r
@@ -411,10 +411,12 @@ class MergeGate(unittest.TestCase):
         self.p.cleanup()
 
     def cfg(self, **kw):
+        """Change harness.json and commit it: the gate reads it from the default branch, not the work tree."""
         hj = self.p.dir / ".claude/harness.json"
         d = json.loads(hj.read_text())
         d.update(kw)
         hj.write_text(json.dumps(d))
+        git(self.p.dir, "commit", "-q", "-am", "harness.json")
 
     def gate(self, ci, files):
         return run([PY, ".claude/scripts/merge_gate.py", "--ci", ci, "--files", files], self.p.dir, check=False)
@@ -453,7 +455,7 @@ class MergeGate(unittest.TestCase):
         r = self.gate("green", "app/page.tsx")
         self.assertEqual(r.returncode, 3)
         self.assertIn("human step 5 Point a domain at the VPS isn't done", r.stdout)
-        self.p.tasks("set-status", "5", "done")
+        self.p.tasks("set-status", "5", "done", "--human-confirmed")
         self.assertEqual(self.gate("green", "app/page.tsx").returncode, 0)
         mc = self.p.dir / ".taskmaster/docs/manual-checks.md"
         mc.write_text(mc.read_text() + "\n### Task 4 - Phone UI (2026-11-14)\n1. Open on a phone\n")
@@ -466,8 +468,10 @@ class MergeGate(unittest.TestCase):
     def test_missing_or_bad_config_fails_closed(self):
         hj = self.p.dir / ".claude/harness.json"
         hj.write_text("{not json")
+        git(self.p.dir, "commit", "-q", "-am", "broken harness.json")
         self.assertEqual(self.gate("green", "README.md").returncode, 3)
-        hj.unlink()
+        git(self.p.dir, "rm", "-q", ".claude/harness.json")
+        git(self.p.dir, "commit", "-q", "-m", "no harness.json")
         r = self.gate("green", "README.md")
         self.assertEqual(r.returncode, 3)
         self.assertIn("no .claude/harness.json", r.stdout)
@@ -522,7 +526,7 @@ class QueuedHumanSteps(unittest.TestCase):
         self.assertIn("agent work done: only queued human steps remain", out)
         self.assertEqual(self.p.tasks("next", "--phase", "2", check=False).returncode, 1)
         self.assertIn("current phase: None", self.p.tasks("phase").stdout, "queued steps do not hold a phase open")
-        self.p.tasks("set-status", "5", "done")
+        self.p.tasks("set-status", "5", "done", "--human-confirmed")
         data = json.loads((self.p.dir / ".taskmaster/tasks/tasks.json").read_text())["master"]["tasks"]
         self.assertNotIn("queued", data[4])
 

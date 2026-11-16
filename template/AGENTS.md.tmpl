@@ -13,11 +13,11 @@ drifting away from the plan.
 - `.taskmaster/docs/human-checklist.md`: steps only the human can do (queued, not blocking). Tick them when done.
 - `TASKS.md`: generated from tasks.json. Never edit by hand.
 
-Helper (Python stdlib only), from the repo root:
+Helper (Python stdlib only), from the repo root, in bash (on Windows: Git Bash, not PowerShell):
 ```
 python .taskmaster/tasks.py status | phase [n] | next [--phase n] | show <id>
 python .taskmaster/tasks.py set-status <id> in-progress|done|deferred|cancelled
-python .taskmaster/tasks.py log <id> "plan: ..."     # timestamped note on a task
+python .taskmaster/tasks.py log <id> 'plan: ...'     # timestamped note (single quotes; or `- <<'EOF'` for any text)
 python .taskmaster/tasks.py add --help               # add a task or subtask
 python .taskmaster/tasks.py validate                 # after any manual edit of tasks.json
 python .taskmaster/render_tasks_md.py                # refresh TASKS.md
@@ -25,7 +25,7 @@ python .taskmaster/render_tasks_md.py                # refresh TASKS.md
 
 ## Work loop (one task at a time)
 1. `tasks.py next`, then `tasks.py show <id>`. Complexity 7+ without subtasks: split it into 3-5 subtasks first.
-2. Read the code the task touches. Log your plan: `tasks.py log <id> "plan: files X, Y; approach ..."`.
+2. Read the code the task touches. Log your plan: `tasks.py log <id> 'plan: files X, Y; approach ...'`.
 3. `tasks.py set-status <id> in-progress`, build it, log what worked and what failed.
 4. Run the task's testStrategy for real. Not done until it passes.
 5. Drift check, `set-status <id> done`, `render_tasks_md.py`, commit with the id: `task 7.2: <title>`, push the branch.

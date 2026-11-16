@@ -6,7 +6,9 @@ description: Push the work branch, open a pull request, and hand it to the merge
 # Deliver: push, PR, merge gate
 
 Goal: finished work reaches the default branch safely. **Whether it merges is decided by
-`.claude/scripts/merge_gate.py`, never by you.** Needs `gh` (GitHub CLI) logged in. No `gh`, no remote, or not a
+`.claude/scripts/merge_gate.py`, never by you.** It reads `.claude/harness.json` from the default branch, and a
+PR that changes `harness.json`, `.claude/settings.json`, `.claude/scripts/` or `.github/` always waits for the
+owner. Needs `gh` (GitHub CLI) logged in. No `gh`, no remote, or not a
 GitHub repo → skip this skill, say so once in the report, and keep going.
 
 ## When
@@ -27,18 +29,17 @@ Claude Code sessions block GitHub's GraphQL API, so `gh pr create/merge/view/che
    statuses), decides, and merges only if allowed. Act on its first line:
    - `DECISION=MERGED` → `git checkout <default> && git pull -q`, new branch `phase-<n+1>` (or the session's
      branch naming), `tasks.py log` the PR number on the phase's last task.
-   - `DECISION=AUTO_MERGE_SET` → GitHub merges it when its branch rules are met. Continue on a new branch cut from
-     this one; deliver again later.
    - `DECISION=FIX_CI` → a failed task, not a stop. Read the failing log with the commands it printed (tail only),
      hand it to the builder ladder (next-task section 5) as a fix, commit, push, run the gate again. Same failure
      twice after real fixes → ESCALATE.
-   - `DECISION=OWNER` → the owner must merge, or finish a human step or eyes-on check first. Add
+   - `DECISION=OWNER` → the owner must merge (merge rules, a protected file, no CI with `require_ci`, or branch
+     protection refused it), or finish a human step or eyes-on check first. Add
      `- [ ] Merge PR #<n> (<url>): <each REASON line>` to `.taskmaster/docs/human-checklist.md`, commit, push,
      and report `PR: #<n> waiting for owner` with the reasons. The lead stops at this phase boundary.
    - `DECISION=CI_TIMEOUT` → CI is slow or stuck. Put `- [ ] Merge PR #<n> once CI finishes` on the checklist and
      report it like OWNER.
    - `DECISION=ERROR` → report the message as an ISSUE; nothing was merged.
 
-Never merge any other way, and never edit `.claude/harness.json` to get a merge through: changing it is the
-owner's call. If merging deploys (`merge_deploys: true`), a merge is a release: the gate already holds it while
+Never merge any other way (no `--ci`/`--files` with `--merge`: the gate refuses it), never push to the default
+branch, and never edit `.claude/harness.json` to get a merge through: changing it is the owner's call. If merging deploys (`merge_deploys: true`), a merge is a release: the gate already holds it while
 human steps are queued or eyes-on checks are open.

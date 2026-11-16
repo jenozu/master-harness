@@ -27,9 +27,11 @@ CI status). Don't dispatch a builder or the verifier. Run `python .taskmaster/ru
   script check; no test, rule or check may be weakened.` On PASS run `run_checks.py run --only <id>` again; exit 0
   closes it, exit 1 is a failure for the ladder (section 5).
 - **exit 2** → refused or not runnable (command not on the allowlist in `.taskmaster/checks.json`, a shell
-  operator, waiting on a dependency). That's a plan problem, not a code problem: fix the task's `check` (or add a
-  check-only tool to the allowlist) and log why; anything that would let it send, publish, delete or spend is an
-  escalation to the lead. Never route exit 2 to a builder.
+  operator, waiting on a dependency, the program isn't installed, or it timed out). That's a plan or machine
+  problem, not a code problem: fix the task's `check` (or add a check-only tool to the allowlist; e.g. on Windows
+  the venv python is `venv/Scripts/python.exe`) and log why. A missing tool you can't fix from the plan, a timeout,
+  or anything that would let it send, publish, delete or spend is an escalation to the lead. Never route exit 2
+  to a builder.
 
 ## 2. Split big tasks first
 Complexity ≥ 7 with no subtasks: dispatch **builder-opus** with "Split task <id> into subtasks; do not build."
@@ -73,17 +75,17 @@ reviewer says CHANGES NEEDED, or the builder hit maxTurns (partial output).
 - BLOCKED for a missing decision, credential or human-only step → don't climb the ladder. If the rest of the task can
   be built against a placeholder, mock or env var, do that and queue the step in `human-checklist.md` with `tasks.py queue <id>` on the human task (see the
   phase-runner's rules). Otherwise leave the task pending, move to another task, and escalate only if nothing else is workable.
-- Log every rung: `python .taskmaster/tasks.py log <id> "escalate <from>→<to>: <one-line reason>"`.
+- Log every rung: `python .taskmaster/tasks.py log <id> 'escalate <from>→<to>: <one-line reason>'`.
 - Opus failed, or 2 escalations and still failing → stop this task and escalate to the lead (the phase-runner's
   rules say how). Run alone by a human, report to the human instead.
 
 ## 6. Close out (after PASS, plus APPROVE if reviewed). Only these steps.
 1. Drift check, in your head: does the result match the task and the PRD goal? If a builder's report shows a later
-   task is now wrong, `tasks.py log <later-id> "note from <id>: ..."`. Scope changes are an escalation, not an edit.
+   task is now wrong, `tasks.py log <later-id> 'note from <id>: ...'`. Scope changes are an escalation, not an edit.
 2. Builder IDEAS → one dated line each in `.taskmaster/docs/parking-lot.md`.
-3. `python .taskmaster/tasks.py log <id> "done by <tier>[, escalated from <tier>]; verified"`
+3. `python .taskmaster/tasks.py log <id> 'done by <tier>[, escalated from <tier>]; verified'`
 4. `python .taskmaster/tasks.py set-status <id> done && python .taskmaster/render_tasks_md.py` (never for a
-   human task: those are queued, and only the human's confirmation marks them done)
+   human task: those are queued, and tasks.py refuses to close them without the human's confirmation)
 5. Stage the builder's FILES CHANGED plus `.taskmaster/` and `TASKS.md`, then `git status --short`: nothing the
    task created may stay untracked. `git commit -q -m "task <id>: <short title>"` (add your environment's
    attribution lines if it asks for them), then `git push -q -u origin HEAD` as a backup. The PR and merge happen

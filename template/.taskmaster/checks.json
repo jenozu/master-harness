@@ -34,8 +34,6 @@
     "cargo build",
     "git status",
     "git diff",
-    "gh pr view",
-    "gh pr checks",
     "gh run view"
   ],
   "timeout_seconds": 900,

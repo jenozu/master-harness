@@ -6,9 +6,10 @@ A reusable Claude Code setup that turns a PRD into a project Claude can build ph
 - **phase-runner** (Sonnet) runs a whole phase with no check-ins, then sends one short report.
 - **Builders** (Haiku → Sonnet → Opus) take each task at the cheapest model that can do it, and escalate up the
   ladder when they fail. A **verifier** (Haiku) and **reviewer** (Sonnet) check the work.
-- **Safe merging:** a script (`merge_gate.py`) decides every merge from `.claude/harness.json`: merge anything
-  green, only safe changes (docs, tests, plan), or nothing. If merging puts the code live, it also waits while your
-  steps (migrations, env values) or eyes-on checks are open.
+- **Safe merging:** a script (`merge_gate.py`) decides every merge from `.claude/harness.json` on the default
+  branch: merge anything green, only safe changes (docs, tests, plan), or nothing. If merging puts the code live,
+  it also waits while your steps (migrations, env values) or eyes-on checks are open, and for PRs with no CI.
+  Changes to the merge rules, harness scripts or CI always wait for you.
 - **Free checks:** tasks that are only commands (lint, tests, build, each phase's final gate) run from a plain
   script with no model at all. A model is called only when one fails.
 - A **Taskmaster plan** in git (`.taskmaster/`) holds the phases, tasks, and work log, plus a small
@@ -51,7 +52,7 @@ repo is private, your machine's git login is used for the clone. If git asks, si
 | You type | What happens |
 |---|---|
 | `/run-phase 2` | Phases run one after another; you get a short report when one needs you |
-| `/clear` | Do this between phases. Everything needed is in the files |
+| `/clear` | When the lead says its context is full. Everything needed is in the files |
 | `/status` | Where things stand, in 6 lines |
 | `/manual-checks run` | Agents run the checks they can (dev servers started in the background) |
 | `/manual-checks results 10.2 failed: ...` | Failures become fix tasks; passed checks are cleared |

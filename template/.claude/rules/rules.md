@@ -28,6 +28,13 @@ and agents wherever they conflict. Merge behaviour is set in `.claude/harness.js
 - Raw SQL only with bound parameters; never build queries or shell commands from user input by string formatting.
 - Every task ends with its testStrategy actually run. "Looks right" is not done.
 
+## Shell
+- Commands in these files are bash. On Windows, Claude Code runs them in Git Bash: never translate them to
+  PowerShell. The commands say `python` (on Windows `python3` is usually a Store stub); on a Mac or Linux
+  without `python`, use `python3`.
+- Notes go in single quotes: `tasks.py log <id> 'text'`. Text with quotes, backticks or `$(...)`: pass it on
+  stdin with `tasks.py log <id> - <<'EOF'`, the text, then `EOF` (double quotes would run what's inside).
+
 ## Keep command output short (it costs tokens; running the command doesn't)
 - Quiet flags: `pytest -q`, `pip install -q`, `npm ... --loglevel=error --no-audit --no-fund`, `git ... -q`.
 - Anything that can print more than ~30 lines: send it to a log and read the end, e.g.
@@ -45,8 +52,9 @@ and agents wherever they conflict. Merge behaviour is set in `.claude/harness.js
 - Push the work branch after every task commit. At the end of each phase, and before any stop, use the `deliver`
   skill: open a PR, then let `python .claude/scripts/merge_gate.py` decide. It merges when `.claude/harness.json`
   allows it and CI is green; otherwise the PR waits for the owner.
-- **Merge only through the merge gate.** Never merge any other way (`gh pr merge`, `gh api .../merge`, a merge
-  pushed to the default branch), never merge red, never force-push, never bypass checks.
+- **Merge only through the merge gate.** Never merge any other way (`gh pr merge`, `gh api .../merge`, a push to
+  the default branch, the gate's offline `--ci`/`--files` flags), never merge red, never force-push, never
+  bypass checks.
 
 ## Keep going, don't wait for approval
 - "Phase done, PR merged, shall I continue?" is never the right ending. Start the next phase right away (unless
@@ -55,7 +63,7 @@ and agents wherever they conflict. Merge behaviour is set in `.claude/harness.js
   `.taskmaster/docs/human-checklist.md` as `- [ ] **Task <id>: <title>**: exact steps, where to run them, what to
   send back`, run `python .taskmaster/tasks.py queue <id>` (the task stays open; tasks that depend on it become
   workable), build against placeholders/mocks/env vars, and log it on the task. **Never mark a human task done
-  yourself**: only the human's confirmation does that.
+  yourself**: only the human's confirmation does that (`--human-confirmed`, used by the lead after they say so).
 - Stop only when the human is truly critical right now: nothing workable is left, the next step needs credentials
   or an account that every remaining task depends on, money, a destructive action, or a goal/non-goal change.
 

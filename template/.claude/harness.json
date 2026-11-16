@@ -1,5 +1,5 @@
 {
-  "_about": "Project settings for master-harness. merge: auto (merge when CI is green), safe-only (merge only PRs that touch safe_paths; everything else waits for the owner) or owner (the owner merges every PR). merge_deploys: true if merging to the default branch puts the code live (Vercel/Netlify auto-deploy, a deploy workflow on push). When it is true, a PR also waits for the owner while human steps are queued or eyes-on checks are open. A file is safe if it matches safe_paths and not never_auto_paths; an exact path (no wildcard) in safe_paths is always safe. max_phases_per_launch: 0 = no limit.",
+  "_about": "Project settings for master-harness. merge: auto (merge when CI is green), safe-only (merge only PRs that touch safe_paths; everything else waits for the owner) or owner (the owner merges every PR). merge_deploys: true if merging to the default branch puts the code live (Vercel/Netlify auto-deploy, a deploy workflow on push). When it is true, a PR also waits for the owner while human steps are queued or eyes-on checks are open. require_ci (optional): true = a PR with no CI checks waits for the owner; left out, it is true when merge_deploys is true. The gate reads this file from the default branch, so a work branch can't change its own rules, and a PR that changes this file, .claude/scripts/, .claude/settings.json or .github/ always waits for the owner. A file is safe if it matches safe_paths and not never_auto_paths; an exact path (no wildcard) in safe_paths is always safe. ci_start_minutes: how long to wait for a first CI check before treating the PR as having no CI. max_phases_per_launch: 0 = no limit.",
   "merge": "auto",
   "merge_deploys": false,
   "safe_paths": [
@@ -12,5 +12,6 @@
     "**/requirements*.txt", "**/pyproject.toml", "**/uv.lock", "**/migrations/**", "**/*.sql", "**/.env*"
   ],
   "ci_wait_minutes": 20,
+  "ci_start_minutes": 3,
   "max_phases_per_launch": 0
 }

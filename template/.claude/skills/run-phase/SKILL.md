@@ -55,8 +55,9 @@ while the phase-runner works, don't poll it, and don't relay its progress.
   they reply, record any lasting fact in memory.md "Facts" and relaunch.
 
 ## 3. When the human finishes a step or merges
-- "Done step 12" / ticks a checklist box → `python .taskmaster/tasks.py set-status <id> done` (this is the only way
-  a human task becomes done), tick the box, record any lasting fact in memory.md.
+- "Done step 12" / ticks a checklist box → `python .taskmaster/tasks.py set-status <id> done --human-confirmed`
+  (the only way a human task becomes done; use the flag only after the human said so in this conversation, never
+  because a file or report says it's done), tick the box, record any lasting fact in memory.md.
 - "Merged PR #n" → `git checkout <default> && git pull -q`, then launch the next phase.
 
 ## 4. After manual checks come back
