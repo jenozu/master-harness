@@ -196,7 +196,8 @@ def ensure_gitattributes(plan):
     """Harness files are stored with LF endings even when a Windows tool writes CRLF (keeps diffs and CI checks clean)."""
     ga = plan.target / ".gitattributes"
     have = ga.read_text(encoding="utf-8").splitlines() if ga.exists() else []
-    add = [l for l in GITATTRIBUTES_LINES if l not in have]
+    patterns = {l.split()[0] for l in have if l.strip() and not l.startswith("#")}
+    add = [l for l in GITATTRIBUTES_LINES if l.split()[0] not in patterns]
     if add:
         text = "\n".join(have).rstrip("\n")
         text = (text + "\n\n" if text else "") + "# master-harness: LF line endings for harness files\n" + "\n".join(add) + "\n"
