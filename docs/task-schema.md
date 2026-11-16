@@ -61,7 +61,7 @@ testStrategy, complexity 7+ without subtasks, blocked-by-cancelled tasks, and mo
 
 ## Commands
 `status`, `phase [n]`, `list [--status s] [--subtasks]`, `next [--phase n]`, `show <id>`,
-`set-status <id> <status> [--force]`, `log <id> "text"`, `add --title ... [--parent id] [--phase n]
+`set-status <id> <status> [--force]`, `log <id> 'text'` (or `log <id> -` to read the note from stdin), `add --title ... [--parent id] [--phase n]
 [--complexity n] [--deps 1,2] [--test ...] [--details ...] [--human] [--review] [--runner script --check "ruff check ."]`,
 `queue <id>`, `validate`, `init [--project name]`.
 

@@ -1,5 +1,59 @@
 # Changelog
 
+## 2.1.2 (2026-11-15)
+Fixes from a full audit (every fix has a test that failed before it). Safety fixes first.
+- **Merge gate can't be loosened from a work branch.** It reads `.claude/harness.json` from the default branch
+  (the PR's base on origin, then origin/HEAD, main, master), never the work tree, so an agent editing the file
+  (committed or not) changes nothing. A PR that changes `harness.json`, `.claude/settings.json`,
+  `.claude/scripts/` or `.github/` always waits for the owner, in every mode; an exact path added to `safe_paths`
+  no longer beats that.
+- **The offline flags no longer merge.** `--ci` and `--files` with `--merge` is an ERROR (before, `--ci green`
+  merged a red PR and `--files README.md` got app code past safe-only).
+- **Only the human closes a human step.** `tasks.py set-status <id> done|cancelled|deferred` refuses a human task
+  unless `--human-confirmed` is given (`--force` doesn't override it); the lead adds it only after the owner says
+  the step is done, and it's logged on the task.
+- **No CI vs slow CI.** New optional `require_ci` in harness.json (left out: true when `merge_deploys` is true):
+  a PR with no CI checks waits for the owner. Workflows that exist but never report on a PR (e.g. only
+  `on: push`) count as no CI after `ci_start_minutes` (default 3) instead of waiting 20 minutes and stopping.
+- **No made-up auto-merge call.** GitHub's REST API can't turn on auto-merge, so the `ccr/auto_merge` call (which
+  never worked) is gone: a merge that branch protection refuses is OWNER with the reason. `AUTO_MERGE_SET` is gone.
+- **Windows: non-ASCII output from `gh`, `git` and the harness's own scripts** (a PR title with ”, a task titled
+  Índice) crashed the merge gate and `check_harness.py` (Python decoded it as cp1252). Every subprocess now reads
+  UTF-8. Any unexpected gate error is now ERROR (exit 2), never exit 1 (which means FIX_CI).
+- **Free checks: a missing program or a timeout is exit 2** ("not runnable: not a builder job") instead of exit 1,
+  so builders no longer climb the ladder to fix code that isn't broken.
+- **Permissions.** New deny rules, kept with open permissions too: `git push` with `--force`, `--force-with-lease`,
+  `-f` anywhere or a `+refspec`, and pushes to `main`/`master` (`origin main`, `HEAD:main`). `curl -s`/`curl -fsS`
+  moved from allow to ask (curl can send data anywhere); open permissions keep curl prompt-free. Upgrades remove
+  the old curl allow rules. BOOTSTRAP's human steps now include turning on branch protection.
+- **VPS kit:** `web.out` in `deploy/vps.json` can't contain `..` (it could point nginx at `/etc`).
+- **Instructions.** The CLAUDE.md template no longer says "One phase per launch" / "`/clear` between phases" (the
+  lead runs phases back to back); README matches. Commands are stated as bash (Git Bash on Windows). Notes go in
+  single quotes or through stdin (`tasks.py log <id> -`), never double quotes, which ran backticks and `$(...)`.
+  The phase-runner commits memory.md before `deliver`, so it's in the PR. UPGRADE ends on a `harness-upgrade`
+  branch with a PR the owner merges, and BOOTSTRAP commits on a `harness-bootstrap` branch. `gh pr checks`/`view`
+  are gone from the free-check allowlist and examples (they use GraphQL, which sessions block).
+- **tasks.py:** a damaged tasks.json (empty, bad JSON, no tasks list, a task without an id, text ids such as
+  `"1"`) gives one `error:` line and exit 2 instead of a crash or a plan that validates but can't be worked.
+  `next` prefers the earliest phase. `add --check` keeps backslashes. `log <id> -` reads the note from stdin.
+  `init` writes parking-lot.md with LF. The renderer handles `"phase": null` and statuses like `Done`.
+- The installer prints `**Project action**` lines too (the 1.1.0 one was missed).
+- `check_harness.py` warns about an old CLAUDE.md roles text and a missing default-branch deny rule, and
+  validates `require_ci`.
+- New tests: the gate's GitHub path through a stand-in `gh`, an end-to-end plan walk with `git diff --check` and
+  the gate's decision, upgrades from every released version, damaged task files, Windows-style decoding.
+- Project action (upgrade): on the `harness-upgrade` branch, after `--upgrade`:
+  1. **CLAUDE.md** (upgrades never touch it): replace the paragraph that starts "Escalation:" under "## Roles" and
+     the two lines under "## Keeping cost down" that mention "One phase per launch" and "`/clear` between phases"
+     with the same parts of `.harness-tmp/template/CLAUDE.md.tmpl`. Keep everything else. `check_harness.py`
+     warns until this is done.
+  2. If the default branch isn't `main` or `master`, add the four deny rules for it from BOOTSTRAP step 7.
+  3. Add `- [ ] Turn on branch protection for the default branch (require a PR, require checks if there is CI,
+     no force pushes)` to `.taskmaster/docs/human-checklist.md`, and tell the owner.
+  4. Merging deploys and no CI on pull requests? PRs now wait for the owner (`require_ci`). Tell the owner, or set
+     `"require_ci": false` only if they say so.
+  5. Open the PR (UPGRADE step 5); the owner merges it, since it changes `.claude/scripts/`.
+
 ## 2.1.1 (2026-11-15)
 - **Fix: TASKS.md failed `git diff --check`.** The renderer ended lines with two spaces (a Markdown line break),
   which whitespace checks in CI report as errors. It now uses a trailing backslash for line breaks and trims

@@ -25,5 +25,5 @@ human once and offer to save it there.
    task. Don't hot-fix on the server.
 5. Smoke test: `curl -fsS {{HEALTH_URL}}` and
    `curl -fsS -o /dev/null -w "%{http_code} %{time_total}s\n" {{SITE_URL}}`.
-6. Log it on the current task: `python .taskmaster/tasks.py log <id> "deployed <sha>"`.
+6. Log it on the current task: `python .taskmaster/tasks.py log <id> 'deployed <sha>'`.
 Destructive migration in this release → take a database backup on the server before step 4.

@@ -61,7 +61,7 @@ When the verifier says MANUAL CHECK NEEDED but everything automatic passed, add 
 `done` and continue. The human runs the list at the end of the phase.
 
 ## Delivery doesn't stop you either
-At the end of the phase run the preloaded `deliver` skill: PR, then the merge gate decides (merge, fix CI, or wait
+At the end of the phase (after the memory commit, see "At the end") run the preloaded `deliver` skill: PR, then the merge gate decides (merge, fix CI, or wait
 for the owner). A phase whose PR waits for the owner is still COMPLETE; say so on the PR line.
 Red CI is a failed task: fix it through the builder ladder. A merge only a human can do goes on the checklist and
 you keep going.
@@ -75,24 +75,27 @@ you keep going.
 - something destructive would be needed (dropping data, force-push, deleting user files);
 - the same builder tier escalated on 3 tasks in a row (the routing may be wrong);
 - the git check at the start found missing or empty files.
-Before stopping: commit the work tree or stash it cleanly, log the problem on the task, and run `deliver` so finished work is merged.
+Before stopping: commit the work tree or stash it cleanly, log the problem on the task, then do "At the end"
+(memory, then `deliver`) so finished work is in a PR.
 
 ## Hitting your turn limit
-Close to maxTurns: wait for any running subagent, finish the current task's close-out, commit, update memory.md "Now", and return
-`PHASE STATUS: PARTIAL`. The lead starts a fresh phase-runner that picks up from the files.
+Close to maxTurns: wait for any running subagent, finish the current task's close-out, commit, then do "At the
+end" (memory, then `deliver`) and return `PHASE STATUS: PARTIAL`. The lead starts a fresh phase-runner that picks up from the files.
 
-## At the end (complete, partial or escalation)
+## At the end (complete, partial or escalation), in this order
 1. **Git check again**: `git status --short` must be empty. Anything left over is either committed with the task
    it belongs to or reported under ISSUE.
 2. Update `.claude/rules/memory.md` once: overwrite "Now", add at most 3 "Learned" lines, update the routing
-   counts, prune to its size caps. Commit: `memory: phase <n> <status>`.
-3. Reply with exactly this block and nothing else. **16 lines maximum**: the human may read it on a phone.
+   counts, prune to its size caps. Commit it on the phase branch: `memory: phase <n> <status>`.
+3. Only then run `deliver`, so the memory commit is part of the PR (never commit after the merge: that would
+   land on the default branch or an unpushed branch).
+4. Reply with exactly this block and nothing else. **16 lines maximum**: the human may read it on a phone.
 ```
 PHASE STATUS: COMPLETE | PARTIAL | ESCALATE | HUMAN NEEDED
 PHASE: <n>   DONE THIS RUN: <ids>   REMAINING: <ids or none>
 ROUTING: script <passed>/<failed>, haiku <first-try>/<escalated>, sonnet <n>/<n>, opus <n>/<n>
 MANUAL CHECKS WAITING: <agent-checkable n, eyes-on n>   HUMAN CHECKLIST: <open items n>
-PR: <#number merged | auto-merge set | #number waiting for owner: <reasons> | none>
+PR: <#number merged | #number waiting for owner: <reasons> | none>
 ISSUE (if not COMPLETE): task <id> - <what's wrong, 2-4 lines>
 TRIED: <tier: approach -> result, one line each>
 OPTIONS: <1-3 concrete options, recommendation first>

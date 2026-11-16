@@ -8,7 +8,9 @@ IDs are "3" for a task and "3.2" for subtask 2 of task 3.
 Phases live in metadata.phases ([{"id": 0, "name": "Foundation"}, ...]); each top-level task has "phase".
 Optional task flags: "human": true (only the human can do it), "review": true (reviewer agent after verifier).
 A human task can be queued ("queued": true, `tasks.py queue <id>`): it stays pending on the human checklist, but
-tasks that depend on it may be built against placeholders. Only the human's confirmation marks it done.
+tasks that depend on it may be built against placeholders. Only the human's confirmation closes it:
+`set-status <id> done --human-confirmed`, which the lead runs only after the human says the step is done.
+Notes with quotes, backticks or $(...): `tasks.py log <id> - <<'EOF'` ... `EOF` (the text comes from stdin).
 Script tasks: "runner": "script" plus "check" (a list of commands) are run by run_checks.py with no model at all.
 """
 import argparse
@@ -43,13 +45,44 @@ def now():
 
 # ---------- storage ----------
 
+def is_int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def structure_problem(data, tag):
+    """One line describing why the file can't be used at all, or None. (validate() checks the plan itself.)"""
+    if not isinstance(data, dict):
+        return "the file must hold a JSON object like {\"master\": {\"tasks\": [...]}}"
+    if tag not in data:
+        return f"tag '{tag}' not found (available: {', '.join(map(str, data)) or 'none'})"
+    if not isinstance(data[tag], dict) or not isinstance(data[tag].get("tasks"), list):
+        return f"'{tag}' needs a \"tasks\" list"
+    for i, t in enumerate(data[tag]["tasks"], 1):
+        if not isinstance(t, dict):
+            return f"task #{i} is not an object"
+        if not is_int(t.get("id")):
+            return f"task #{i} ('{t.get('title', '')}'): id must be a whole number, got {json.dumps(t.get('id'))}"
+        subs = t.get("subtasks", [])
+        if not isinstance(subs, list):
+            return f"task {t['id']}: subtasks must be a list"
+        for s in subs:
+            if not isinstance(s, dict) or not is_int(s.get("id")):
+                got = json.dumps(s.get("id")) if isinstance(s, dict) else "not an object"
+                return f"task {t['id']}: every subtask id must be a whole number, got {got}"
+    return None
+
+
 def load(path, tag):
     if not os.path.exists(path):
         die(f"{path} not found. Run `tasks.py init` first.")
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    if tag not in data:
-        die(f"tag '{tag}' not found (available: {', '.join(data) or 'none'})")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except ValueError as e:
+        die(f"{path} is not valid JSON ({e}). Fix it by hand (git diff shows what changed), then `tasks.py validate`.")
+    prob = structure_problem(data, tag)
+    if prob:
+        die(f"{path}: {prob}")
     return data
 
 
@@ -126,6 +159,15 @@ def exe_name(arg):
     return base
 
 
+def split_args(cmd):
+    """Split a command line into arguments like a shell would, but keep backslashes (Windows paths)."""
+    lex = shlex.shlex(cmd, posix=True)
+    lex.whitespace_split = True
+    lex.escape = ""
+    lex.commenters = ""
+    return list(lex)
+
+
 def norm_check(entry):
     """One check entry -> (argv, cwd, problem). Entry: ["pytest", "-q"] or {"cmd": [...], "cwd": "frontend"}."""
     cwd = "."
@@ -134,7 +176,7 @@ def norm_check(entry):
         entry = entry.get("cmd")
     if isinstance(entry, str):
         try:
-            hint = f", e.g. {shlex.split(entry)}"
+            hint = f", e.g. {split_args(entry)}"
         except ValueError:
             hint = ""
         return None, cwd, f"'{entry}' is a string; write it as a list of arguments{hint}"
@@ -236,6 +278,12 @@ def phase_of(task):
     return task.get("phase")
 
 
+def phase_key(task):
+    """Sort key: earlier phases first, tasks without a phase last."""
+    ph = phase_of(task)
+    return ph if is_int(ph) else 10 ** 6
+
+
 def meta_of(data, tag):
     return data[tag].setdefault("metadata", {})
 
@@ -283,7 +331,7 @@ def pick_next(tasks, phase=None):
     elig = [t for t in tasks if status_of(t) in live and not is_queued(t) and not unmet(t, None, done)]
     if not elig:
         return None
-    elig.sort(key=lambda t: (0 if status_of(t) == "in-progress" else 1,
+    elig.sort(key=lambda t: (0 if status_of(t) == "in-progress" else 1, phase_key(t),
                              -prio(t), len(t.get("dependencies", [])), t["id"]))
     top = elig[0]
     # descend into first workable subtask, if any are left
@@ -348,6 +396,8 @@ def validate(tasks, meta=None):
                 warns.append(f"{fid}: no testStrategy")
             if st in ("pending", "in-progress"):
                 for d in deps:
+                    if d not in ids:
+                        continue
                     dt, _ = lookup(tasks, d)
                     if dt is not None and status_of(dt) in ("cancelled", "deferred"):
                         warns.append(f"{fid}: blocked by {status_of(dt)} dependency {d}")
@@ -411,7 +461,7 @@ def cmd_init(a):
     os.makedirs(docs, exist_ok=True)
     pl = os.path.join(docs, "parking-lot.md")
     if not os.path.exists(pl):
-        with open(pl, "w", encoding="utf-8") as f:
+        with open(pl, "w", encoding="utf-8", newline="\n") as f:
             f.write("# Parking lot\n\nIdeas that are not part of the current plan. "
                     "Review at the end of each phase: promote, defer or drop.\n\n")
     print(f"created {a.file} and {pl}")
@@ -566,6 +616,12 @@ def cmd_set_status(a):
     data = load(a.file, a.tag)
     tasks = data[a.tag]["tasks"]
     item, parent = find(tasks, a.id)
+    human = bool(item.get("human") or (parent or {}).get("human"))
+    if human and a.status in ("done", "cancelled", "deferred") and not a.human_confirmed:
+        die(f"{a.id} is a human step: only the human closes it. After they confirm it's {a.status}, run "
+            f"`tasks.py set-status {a.id} {a.status} --human-confirmed` (--force doesn't override this)")
+    if a.human_confirmed and not human:
+        die(f"{a.id} is not a human task; --human-confirmed is only for human steps")
     done = met_ids(tasks)
     if a.status in ("in-progress", "done") and not a.force:
         miss = unmet(item, parent, done)
@@ -579,6 +635,9 @@ def cmd_set_status(a):
     item["status"] = a.status
     if a.status in ("done", "cancelled"):
         item.pop("queued", None)
+    if a.human_confirmed:
+        entry = f"[{now()}] human confirmed: {a.status}"
+        item["details"] = (item.get("details", "").rstrip() + "\n\n" + entry).lstrip("\n")
     msgs = []
     if parent and a.status == "in-progress" and status_of(parent) == "pending":
         parent["status"] = "in-progress"
@@ -602,7 +661,10 @@ def cmd_set_status(a):
 def cmd_log(a):
     data = load(a.file, a.tag)
     item, parent = find(data[a.tag]["tasks"], a.id)
-    entry = f"[{now()}] {a.text}"
+    text = sys.stdin.read().strip() if a.text == "-" else a.text
+    if not text:
+        die("empty note")
+    entry = f"[{now()}] {text}"
     item["details"] = (item.get("details", "").rstrip() + "\n\n" + entry).lstrip("\n")
     save(a.file, data, a.tag)
     print(f"logged to {a.id}")
@@ -637,7 +699,7 @@ def cmd_add(a):
     if a.runner:
         new["runner"] = a.runner
     if a.check:
-        new["check"] = [shlex.split(c) for c in a.check]
+        new["check"] = [split_args(c) for c in a.check]
         if not a.test:
             new["testStrategy"] = "python .taskmaster/run_checks.py run --only <this id>"
     if a.parent is None:
@@ -728,11 +790,13 @@ def main():
     sp = sub.add_parser("set-status")
     sp.add_argument("id")
     sp.add_argument("status")
-    sp.add_argument("--force", action="store_true")
+    sp.add_argument("--force", action="store_true", help="ignore unmet dependencies or open subtasks")
+    sp.add_argument("--human-confirmed", action="store_true",
+                    help="close a human step; only after the human said it's done")
     sp.set_defaults(fn=cmd_set_status)
     sp = sub.add_parser("log")
     sp.add_argument("id")
-    sp.add_argument("text")
+    sp.add_argument("text", help="the note, or - to read it from stdin (use for quotes, backticks, $(...))")
     sp.set_defaults(fn=cmd_log)
     sp = sub.add_parser("add")
     sp.add_argument("--title", required=True)

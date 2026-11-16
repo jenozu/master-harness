@@ -15,7 +15,8 @@ Change: `$ARGUMENTS` (or what the human just said).
 2. **PRD first.** Add a dated entry to the PRD's decision log: what changed, why, what it replaces. Edit the
    affected PRD section to match. Never silently rewrite the goal.
 3. **Then tasks.**
-   - Obsolete pending tasks → `tasks.py set-status <id> cancelled` + a log line saying why. Never delete.
+   - Obsolete pending tasks → `tasks.py set-status <id> cancelled` + a log line saying why. Never delete. A human
+     task can only be cancelled with the human's ok in this conversation (`--human-confirmed`).
    - Done tasks whose result is now wrong → add a corrective task or subtask; never reword done work.
    - New work → `tasks.py add` with phase, complexity, testStrategy, deps (same rules as `plan-from-prd`).
    - `tasks.py validate`, `render_tasks_md.py`.

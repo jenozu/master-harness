@@ -17,6 +17,8 @@ If `.harness-tmp/` doesn't exist: `git clone -q https://github.com/jenozu/master
   **migration from a pre-harness setup** (step 3 first, then step 2).
 
 ## 2. Normal upgrade
+Work on a branch, never on the default branch: `git checkout -q -b harness-upgrade` (if the name is taken,
+`harness-upgrade-<new version>`). Every commit below, including ones a project action asks for, goes on it.
 ```
 python .harness-tmp/scripts/apply_template.py --target . --upgrade
 ```
@@ -32,8 +34,14 @@ Then work only from what the installer printed (don't read the changelog or diff
    project rule file, never back into the harness-owned file. `none` → skip. Files under "replaced, untouched"
    need nothing.
 3. `python .claude/scripts/check_harness.py --no-git` → fix every ERROR.
-4. `rm -rf .harness-tmp .harness-backup`, commit `harness: upgrade to v<new>`, and report in at most 6 lines:
-   old → new version, project actions done, customized files handled, anything the owner must decide.
+4. `rm -rf .harness-tmp .harness-backup`, then `git add -A`, `git commit -q -m "harness: upgrade to v<new>"` and
+   `git push -q -u origin HEAD`.
+5. Open a PR with GitHub's REST API (`{o}/{r}` from `git remote get-url origin`):
+   `gh api repos/{o}/{r}/pulls -f title="harness: upgrade to v<new>" -f head=harness-upgrade -f base=<default> -f body="<old> -> <new>; project actions done" --jq .html_url`.
+   Don't merge it and don't run the merge gate with `--merge`: an upgrade changes `.claude/scripts/`, so the owner
+   reviews and merges it. No `gh` or no remote: leave the branch pushed (or local) and say so.
+6. Report in at most 6 lines: old → new version, project actions done, customized files handled, the PR link,
+   anything the owner must decide.
 
 ## Switch a project to open permissions
 ```

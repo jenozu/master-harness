@@ -23,13 +23,22 @@ the reviewer have `Agent` disallowed.
 
 ## Merging safely
 `.claude/scripts/merge_gate.py` is the only way a PR gets merged. It waits for CI (GitHub check runs and classic
-commit statuses), then applies `.claude/harness.json`:
+commit statuses), then applies `.claude/harness.json` **as committed on the default branch** (a work branch can't
+loosen its own rules):
 - `merge`: `auto` (any green PR), `safe-only` (only PRs whose files all match `safe_paths` and none of
   `never_auto_paths`), or `owner` (never merges).
 - `merge_deploys: true` (merging goes live): also waits while human steps are queued or eyes-on checks are open,
   so code can't ship before a migration, an env value or a human look.
+- `require_ci` (optional; left out, it follows `merge_deploys`): a PR with no CI checks waits for the owner.
+  Workflows that never report on a PR (e.g. they run only on push) count as no CI after `ci_start_minutes`.
+- A PR that changes `harness.json`, `.claude/settings.json`, `.claude/scripts/` or `.github/` always waits for the
+  owner, in every mode. The offline flags `--ci`/`--files` never merge. A merge that branch protection refuses
+  goes to the owner (GitHub's REST API can't turn on auto-merge).
+- Human steps: `tasks.py` refuses to close a human task without `--human-confirmed`, which the lead adds only
+  after the owner says the step is done.
 When the gate says OWNER, the lead stops at the phase boundary with the PR link and the reasons. Ask rules in
-settings.json stop agents from merging any other way. Owner rules in `.claude/rules/project.md` (seeded, never
+settings.json stop agents from merging any other way, and deny rules block force-pushes and pushes to
+`main`/`master`; branch protection on GitHub (a BOOTSTRAP human step) backs this up. Owner rules in `.claude/rules/project.md` (seeded, never
 replaced) override the harness's own rules.
 
 ## Free checks
@@ -50,7 +59,7 @@ Commands must match the allowlist in `.taskmaster/checks.json` (seeded, project-
 - **Short output everywhere.** Quiet flags, logs to files, tails only. Dev servers run in the background through
   `devserver.py`, so their logs never enter a context.
 - **memory.md is updated once per phase**, not per task. It's capped at 80 lines.
-- **`/clear` between phases.** All state is in files.
+- **`/clear` when the lead stops for context** (it checks between phases). All state is in files.
 
 ## Where state lives
 | File | Holds | Written by |

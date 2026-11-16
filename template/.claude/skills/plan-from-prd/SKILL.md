@@ -58,7 +58,8 @@ decided, and nothing is sent, published, deleted or paid for. Everything else st
   complexity 3, depending on every other task in the phase, `check` = the project's lint, type-check, test and
   build commands (the ones in AGENTS.md, split into argument lists). It catches what per-task checks missed before
   the PR, for free.
-- Other typical script tasks: a migration status check, a smoke script, `gh pr checks <n>`.
+- Other typical script tasks: a migration status check, a smoke script. (Not `gh pr ...`: those commands use
+  GitHub's GraphQL API, which Claude Code sessions block; CI status is the merge gate's job.)
 
 Tasks scored 7+ get 3-5 subtasks (`tasks.py add --parent <id> ...`), each with its own test and complexity.
 

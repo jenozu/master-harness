@@ -26,9 +26,7 @@
       "Bash(git ls-files *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git stash *)",
-      "Bash(curl -s *)",
-      "Bash(curl -fsS *)"
+      "Bash(git stash *)"
     ],
     "ask": [
       "Bash(git push)",
@@ -37,11 +35,27 @@
       "Bash(rsync *)",
       "Bash(gh pr merge*)",
       "Bash(gh api *pulls/*/merge*)",
-      "Bash(gh api *merge_method*)"
+      "Bash(gh api *merge_method*)",
+      "Bash(curl -s *)",
+      "Bash(curl -fsS *)"
     ],
     "deny": [
       "Bash(git push --force *)",
       "Bash(git push -f *)",
+      "Bash(git push *--force*)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)",
+      "Bash(git push * +*)",
+      "Bash(git push *:main)",
+      "Bash(git push *:main *)",
+      "Bash(git push *:master)",
+      "Bash(git push *:master *)",
+      "Bash(git push origin main)",
+      "Bash(git push origin main *)",
+      "Bash(git push origin master)",
+      "Bash(git push origin master *)",
+      "Bash(git push -u origin main*)",
+      "Bash(git push -u origin master*)",
       "Bash(git reset --hard *)",
       "Bash(git clean -fdx *)",
       "Read(./.env)",

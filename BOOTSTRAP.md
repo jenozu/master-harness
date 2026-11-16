@@ -92,7 +92,12 @@ re-running won't overwrite files it already created). "kept existing" files: mer
 - `.claude/harness.json` (merge rules, enforced by the merge gate): set `merge_deploys` from step 3. Merging
   deploys → `"merge": "safe-only"` (agents merge only docs/tests/plan changes; app code waits for the owner),
   unless the owner said otherwise. Not live → `"merge": "auto"`. Add the project's own sensitive folders (auth,
-  payments, admin, migrations) to `never_auto_paths`. `max_phases_per_launch` only if the owner asked for a cap.
+  payments, admin, migrations) to `never_auto_paths`. Leave `require_ci` out (a PR with no CI then waits for the
+  owner exactly when merging deploys) unless the owner said otherwise. `max_phases_per_launch` only if the owner
+  asked for a cap.
+- `.claude/settings.json`: the deny rules block pushing to `main` and `master`. If the default branch has another
+  name, add `Bash(git push *:<name>)`, `Bash(git push *:<name> *)`, `Bash(git push origin <name>)` and
+  `Bash(git push origin <name> *)` to `deny`.
 - `.claude/rules/project.md`: owner rules the PRD states as always/never (e.g. "back up the database before a
   migration"). Keep `(none yet)` if there are none.
 - `.taskmaster/checks.json` (allowlist for free checks): keep only entries this stack uses and add any check-only
@@ -127,16 +132,23 @@ a task (build the table for the report).
 
 ## 11. Clean up, commit, report
 1. `rm -rf .harness-tmp` (it's gitignored, but remove it anyway).
-2. `git add -A && git commit -q -m "task 0: bootstrap agent harness (master-harness v<VERSION>)"`
+2. Commit on a branch, never on the default branch: `git checkout -q -b harness-bootstrap`, then
+   `git add -A && git commit -q -m "task 0: bootstrap agent harness (master-harness v<VERSION>)"`. Exception: a
+   brand-new repo with no commits yet commits on the default branch (there's nothing to open a PR against).
 3. `python .claude/scripts/check_harness.py` (now including the git check) → 0 errors.
-4. Deliver with the `deliver` skill steps (push, PR titled `bootstrap: agent harness`, merge when checks pass).
-   Skip quietly if `gh` or a remote isn't available and list it under human steps.
+4. Deliver with the `deliver` skill steps (push, PR titled `bootstrap: agent harness`). The merge gate answers
+   OWNER: the PR adds `.claude/scripts/` and `harness.json`, which the owner reviews. Put `- [ ] Merge PR #<n>
+   (harness setup)` on the human checklist. A brand-new repo: just `git push -q -u origin HEAD`. Skip quietly if
+   `gh` or a remote isn't available and list it under human steps.
 5. Reply with only:
    1. What was installed (core + which library pieces + any external skills, with URLs).
    2. Phases with task counts and one-line titles.
    3. Capability → task table.
    4. Assumptions you made, and open questions (also in memory.md).
-   5. Human-only steps before or during the build.
+   5. Human-only steps before or during the build. Always include: **turn on branch protection for the default
+      branch** on GitHub (Settings → Branches → Add rule for `<default>`: require a pull request before merging,
+      require status checks to pass if there is CI, don't allow force pushes). It stops anything from reaching
+      the default branch without a PR, even if a permission rule is missed. Add it to the human checklist too.
    6. Merge rules in one line: `merge` mode and whether merging deploys (from `.claude/harness.json`).
    7. How to start: `/clear`, then `/model opus`, then `/run-phase 0`. It runs phase after phase, merges what
       the merge rules allow, and queues human-only steps in `.taskmaster/docs/human-checklist.md`.

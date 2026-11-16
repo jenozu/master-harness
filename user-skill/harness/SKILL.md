@@ -34,8 +34,9 @@ Keep this command current: if `.harness-tmp/user-skill/harness/SKILL.md` differs
 
 ## 3b. Upgrade
 Already on the newest version (`.claude/HARNESS_VERSION` equals `.harness-tmp/VERSION`) → say so, remove
-`.harness-tmp`, stop. Otherwise follow `.harness-tmp/UPGRADE.md` step 2: the installer prints the project actions
-and the few files that need review; act only on those. Don't start a phase afterwards. If the session is on
+`.harness-tmp`, stop. Otherwise follow `.harness-tmp/UPGRADE.md` step 2 to its end: it works on a `harness-upgrade` branch, the
+installer prints the project actions and the few files that need review (act only on those), and it ends with a
+PR for the owner to merge, never a commit on the default branch. Don't start a phase afterwards. If the session is on
 Opus, mention once that `/model sonnet` does upgrades for less.
 
 ## 4. Finish

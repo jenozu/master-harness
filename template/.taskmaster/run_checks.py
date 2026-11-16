@@ -2,7 +2,7 @@
 """Free checks: run "script" tasks with no model (Python stdlib only).
 
 A task with "runner": "script" has a "check": a list of commands that need no judgment (lint, type check, tests,
-build, `gh pr checks`). This script runs them directly, so they cost zero tokens. Run from the repo root:
+build, a smoke script). This script runs them directly, so they cost zero tokens. Run from the repo root:
 
   python .taskmaster/run_checks.py plan [--phase N]          list open script tasks in order; runs nothing
   python .taskmaster/run_checks.py run [--phase N] [--only ID] [--from ID]
@@ -12,7 +12,8 @@ its expected code (default 0); then it is logged and marked done through tasks.p
 run, leaves the status alone and prints the failing command with the last lines of its output.
 
 Exit codes: 0 all good (or nothing to run), 1 a check failed (the code needs fixing: send a builder),
-2 refused or not runnable (the plan or checks.json needs fixing: not a builder job).
+2 refused or not runnable: off the allowlist, a shell operator, waiting on a dependency, the program isn't
+installed or the command timed out (the plan, checks.json or the machine needs fixing: not a builder job).
 
 Safety: commands are argument lists run without a shell. Each must start with an entry in the allowlist in
 .taskmaster/checks.json ("pytest", or a prefix such as "npm run"); anything else is refused. Output never goes
@@ -51,7 +52,7 @@ def load_config():
 
 
 def allowed(argv, allow):
-    """True if argv starts with one of the allowlist entries ("pytest", "npm run", "gh pr view")."""
+    """True if argv starts with one of the allowlist entries ("pytest", "npm run", "git diff")."""
     cmd = [tm.exe_name(argv[0])] + argv[1:]
     for entry in allow:
         want = entry.split()
@@ -115,7 +116,7 @@ def run_one(argv, cwd, expect, timeout, retries):
         exe = shutil.which(argv[0])
     res = {"cmd": " ".join(argv), "cwd": cwd, "expect": expect, "start": stamp(), "attempts": 0}
     if exe is None:
-        res.update(end=stamp(), exit=None, ok=False, seconds=0.0, sha256="", stdout="",
+        res.update(end=stamp(), exit=None, ok=False, seconds=0.0, sha256="", stdout="", missing=True,
                    stderr=f"'{argv[0]}' was not found on PATH")
         return res
     env = dict(os.environ, CI="1")  # stops test runners from waiting in watch mode
@@ -136,6 +137,7 @@ def run_one(argv, cwd, expect, timeout, retries):
             out, err, code = b"", str(e).encode(), None
             break
     res.update(end=stamp(), exit=code, ok=(code == expect), seconds=round(time.monotonic() - t0, 1),
+               timed_out=code is None and b"timed out after" in err,
                sha256=hashlib.sha256(out).hexdigest(),
                stdout=out.decode("utf-8", "replace"), stderr=err.decode("utf-8", "replace"))
     return res
@@ -157,7 +159,8 @@ def write_log(fid, item, results, verdict, n):
 
 def tasks_cmd(a, *args):
     return subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "tasks.py"),
-                           "--file", a.file, "--tag", a.tag, *args], cwd=ROOT, capture_output=True, text=True)
+                           "--file", a.file, "--tag", a.tag, *args], cwd=ROOT, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
 
 
 def cmd_plan(a):
@@ -238,6 +241,17 @@ def cmd_run(a):
             results.append(r)
             if not r["ok"]:
                 break
+        if not results[-1]["ok"] and (results[-1].get("missing") or results[-1].get("timed_out")):
+            r = results[-1]
+            why = "is not installed or not on PATH" if r.get("missing") else f"timed out after {timeout}s"
+            log = write_log(fid, item, results, "NOT RUNNABLE", n)
+            tasks_cmd(a, "log", fid, f"script check not runnable: `{r['cmd']}` {why}; details in {log}")
+            print(f"NOT RUNNABLE task {fid}: `{r['cmd']}` {why}" + (f"   (in {r['cwd']})" if r["cwd"] != "." else ""))
+            print(f"--- last {n} lines of stderr ---\n{tail(r['stderr'], n)}")
+            print("status unchanged. This is not a builder job: fix the command in the task's check (e.g. the venv "
+                  "path differs on Windows: venv/Scripts/python.exe), or the machine (install the tool); if neither "
+                  f"is possible here, escalate. Full record: {log}")
+            return 2
         if not results[-1]["ok"]:
             r = results[-1]
             log = write_log(fid, item, results, "FAIL", n)
