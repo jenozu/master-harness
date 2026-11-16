@@ -13,7 +13,8 @@ Change: `$ARGUMENTS` (or what the human just said).
    - Changes a goal, a non-goal, the stack, hosting, or a data model the PRD fixed → continue, and confirm with
      the human in one sentence before editing anything if it came from you rather than them.
 2. **PRD first.** Add a dated entry to the PRD's decision log: what changed, why, what it replaces. Edit the
-   affected PRD section to match. Never silently rewrite the goal.
+   affected PRD section to match. Never silently rewrite the goal. If the goal or a non-goal changed, update the
+   copy agents read: `tasks.py meta --goal '...' --non-goal '...'` (the non-goal list is replaced).
 3. **Then tasks.**
    - Obsolete pending tasks → `tasks.py set-status <id> cancelled` + a log line saying why. Never delete. A human
      task can only be cancelled with the human's ok in this conversation (`--human-confirmed`).

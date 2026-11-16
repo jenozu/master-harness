@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.2.0 (2026-11-15)
+Cheaper phases: fewer phase-runner steps per task, no PRD reads per agent, free verification where it's safe.
+- **`tasks.py close <id>`**: the whole close-out in one call after verification: log `done by <tier>; verified`,
+  mark done, render TASKS.md, stage the builder's files plus the plan, stop (exit 3) if any change isn't in
+  `--files`, commit `task <id>: <title>` (with `--trailer` lines), push. It refuses human tasks and the default
+  branch. `next --details` prints what `show` prints. The phase-runner's steps per task go from 11 to 5.
+- **Goal and non-goals in tasks.json** (`metadata.goal`, `metadata.non_goals`, set with `tasks.py meta`), printed
+  at the top of `show` / `next --details`. AGENTS.md no longer tells every agent to read the PRD each session, and
+  builders no longer open it. `plan-from-prd` writes them; `adapt` updates them; `validate` warns while empty.
+- **Free verification**: a task may carry `verify` commands. `run_checks.py verify <id>` runs them with no model
+  when every uncommitted change is docs, tests or the plan (`safe_paths` from the committed harness.json, so a
+  builder can't widen it); anything touching app code still gets the verifier agent (exit 3).
+- **BOOTSTRAP** fetches the Claude Code docs only when `check_harness.py` reports an unknown agent or skill field.
+- Project action (upgrade): on the `harness-upgrade` branch, after `--upgrade`:
+  1. From the PRD: `python .taskmaster/tasks.py meta --goal '<goal in 1-2 sentences>' --non-goal '<...>'`
+     (one `--non-goal` per non-goal). `check_harness.py` warns until it's set.
+  2. Optional: pending tasks whose testStrategy is only commands get a `verify` list (same format as `check`),
+     so a docs- or tests-only result is verified for free. Then `tasks.py validate`.
+
 ## 2.1.2 (2026-11-15)
 Fixes from a full audit (every fix has a test that failed before it). Safety fixes first.
 - **Merge gate can't be loosened from a work branch.** It reads `.claude/harness.json` from the default branch
