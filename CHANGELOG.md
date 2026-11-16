@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.2.1 (2026-11-16)
+- **A project's own Python linter no longer fails CI on the harness's scripts.** Projects with a strict ruff config
+  (for example line-length 100 and rules E/W/I/B/UP/S) linted `.taskmaster/*.py` and `.claude/scripts/*.py` and
+  every CI job failed. The harness now ships `.taskmaster/ruff.toml` and `.claude/ruff.toml`; ruff uses the
+  closest config, so those folders follow the harness's own style. Real bugs there are still caught (syntax errors
+  and pyflakes: undefined names, unused imports). BOOTSTRAP says to exclude both folders from any other
+  whole-repo linter or formatter.
+- Project action (upgrade): none for ruff (the upgrade adds both files). If the project runs flake8, black,
+  pylint, mypy or prettier over the whole repo, add `.taskmaster/` and `.claude/` to its excludes.
+
 ## 2.2.0 (2026-11-15)
 Cheaper phases: fewer phase-runner steps per task, no PRD reads per agent, free verification where it's safe.
 - **`tasks.py close <id>`**: the whole close-out in one call after verification: log `done by <tier>; verified`,
