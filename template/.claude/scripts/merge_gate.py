@@ -23,6 +23,7 @@ Testing/offline (decide only, never with --merge): --ci green|pending|red|none a
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -192,7 +193,9 @@ def blockers(cfg, files, ci="green"):
 # ---------- GitHub (REST only: GraphQL is blocked in Claude Code sessions) ----------
 
 def gh(*args, method=None):
-    cmd = ["gh", "api"] + (["-X", method] if method else []) + list(args)
+    # shutil.which honours PATHEXT, so a gh.cmd/gh.bat shim (scoop, wrappers) works on Windows too; a bare "gh"
+    # only finds gh.exe there.
+    cmd = [shutil.which("gh") or "gh", "api"] + (["-X", method] if method else []) + list(args)
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:

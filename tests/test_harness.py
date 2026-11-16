@@ -18,7 +18,7 @@ PY = sys.executable
 
 
 def run(args, cwd, check=True):
-    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if check and r.returncode != 0:
         raise AssertionError(f"{args} failed ({r.returncode}):\n{r.stdout}\n{r.stderr}")
     return r
