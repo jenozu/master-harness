@@ -24,12 +24,16 @@ for t in sorted(tasks, key=lambda t: (t.get("phase", 10**6), t["id"])):
         out += ["", f"## {head}", ""]
     deps = f" _(after {', '.join(map(str, t.get('dependencies', [])))})_" if t.get("dependencies") else ""
     tag = " **[HUMAN]**" if t.get("human") else ""
-    out.append(f"- {box.get(t.get('status'), '[ ]')} **{t['id']}. {t['title']}**{tag}{deps}  ")
+    lines = [f"- {box.get(t.get('status'), '[ ]')} **{t['id']}. {' '.join(str(t['title']).split())}**{tag}{deps}"]
     if t.get("description"):
-        out.append(f"  {t['description']}  ")
+        lines.append(f"  {' '.join(str(t['description']).split())}")
     if t.get("testStrategy"):
-        out.append(f"  _Test:_ {' '.join(t['testStrategy'].split())}")
+        lines.append(f"  _Test:_ {' '.join(t['testStrategy'].split())}")
+    # Line breaks inside a list item: a trailing backslash (CommonMark), never trailing spaces, which
+    # `git diff --check` and whitespace linters reject.
+    out += [ln + "\\" for ln in lines[:-1]] + lines[-1:]
     for s in t.get("subtasks", []):
-        out.append(f"  - {box.get(s.get('status'), '[ ]')} {t['id']}.{s['id']} {s['title']}")
+        out.append(f"  - {box.get(s.get('status'), '[ ]')} {t['id']}.{s['id']} {' '.join(str(s['title']).split())}")
+out = [ln.rstrip() for ln in out]  # no trailing whitespace anywhere in the generated file
 (root / "TASKS.md").write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
 print(f"wrote TASKS.md ({len(tasks)} tasks)")

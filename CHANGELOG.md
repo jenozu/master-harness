@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.1 (2026-11-15)
+- **Fix: TASKS.md failed `git diff --check`.** The renderer ended lines with two spaces (a Markdown line break),
+  which whitespace checks in CI report as errors. It now uses a trailing backslash for line breaks and trims
+  every line, so the generated file has no trailing whitespace. (Before 2.0.1 this was hidden behind the CRLF
+  problem.)
+- The parking-lot template no longer ends with a blank line; every harness file passes `git diff --check`.
+- The installer no longer adds a second `.gitattributes` rule for a pattern the project already has.
+- New test: a full install with every library piece plus a rendered TASKS.md must pass `git diff --check`.
+- Project action (upgrade): run `python .taskmaster/render_tasks_md.py` and commit TASKS.md (and
+  `.taskmaster/docs/parking-lot.md` if it ends with a blank line, remove it). A hand-added
+  `whitespace=-trailing-space` on TASKS.md in `.gitattributes` is no longer needed; leave it or remove it.
+
 ## 2.1.0 (2026-11-15)
 - **Cheaper upgrades.** The installer now compares each harness-owned file with the template as it was at the
   project's old version (from the master-harness git history). Files nobody edited are replaced quietly; only

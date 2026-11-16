@@ -711,6 +711,46 @@ class WindowsConsole(unittest.TestCase):
             p.cleanup()
 
 
+class Whitespace(unittest.TestCase):
+    """Projects whose CI runs `git diff --check` must never fail on harness files."""
+
+    def test_full_install_and_rendered_tasks_pass_git_diff_check(self):
+        d = Path(tempfile.mkdtemp(prefix="ws-"))
+        try:
+            run(["git", "init", "-q"], d)
+            lib = ROOT / "library"
+            rules = ",".join(f.stem for f in (lib / "rules").glob("*.md"))
+            skills = ",".join(f.name for f in (lib / "skills").iterdir() if f.is_dir())
+            settings = ",".join(f.stem for f in (lib / "settings").glob("*.json"))
+            run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(d), "--values",
+                 str(ROOT / "tests/fixtures/sample/values.json"), "--rules", rules, "--skills", skills,
+                 "--settings", settings], d)
+            data = json.loads((ROOT / "tests/fixtures/sample/tasks.json").read_text())
+            data["master"]["tasks"][0]["description"] = "Trailing spaces in the source   "
+            data["master"]["tasks"][0]["title"] = "Title with trailing space "
+            (d / ".taskmaster/tasks/tasks.json").write_text(json.dumps(data))
+            run([PY, ".taskmaster/render_tasks_md.py"], d)
+            run(["git", "add", "-A"], d)
+            r = subprocess.run(["git", "diff", "--cached", "--check"], cwd=d, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout)
+            md = (d / "TASKS.md").read_text(encoding="utf-8")
+            self.assertIn("**1. Title with trailing space**\\\n  Trailing spaces in the source\\\n  _Test:_", md)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_gitattributes_keeps_a_project_rule_for_the_same_pattern(self):
+        p = Project()
+        try:
+            ga = p.dir / ".gitattributes"
+            ga.write_text("TASKS.md text eol=lf whitespace=-trailing-space\n", encoding="utf-8")
+            run([PY, str(ROOT / "scripts/apply_template.py"), "--target", str(p.dir), "--upgrade"], p.dir)
+            text = ga.read_text(encoding="utf-8")
+            self.assertEqual(sum(1 for l in text.splitlines() if l.startswith("TASKS.md ")), 1)
+            self.assertIn(".taskmaster/** text=auto eol=lf", text)
+        finally:
+            p.cleanup()
+
+
 class DevServer(unittest.TestCase):
     def test_start_status_stop(self):
         p = Project(rules="", skills="", settings="")
