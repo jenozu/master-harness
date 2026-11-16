@@ -1,0 +1,7 @@
+# master-harness scripts follow their own style, so the project's ruff rules don't apply here (ruff uses
+# the closest config). Real bugs are still caught: syntax errors (E9) and pyflakes (F: undefined names,
+# unused imports). Managed by the harness; upgrades refresh it.
+line-length = 120
+
+[lint]
+select = ["E9", "F"]

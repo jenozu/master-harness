@@ -668,7 +668,7 @@ class UpgradeFromEveryVersion(unittest.TestCase):
             out = r.stdout
             for f, data in before.items():
                 self.assertEqual((proj / f).read_bytes(), data, f"{f} changed")
-            self.assertIn("CUSTOMIZED: none", out)
+            self.assertNotIn("CUSTOMIZED (", out, "no harness file flagged as edited in the project")
             self.assertNotIn("couldn't find the v", out)
             acts = [ln for ln in out.split("PROJECT ACTIONS")[1].splitlines() if ln.startswith("  [")]
             vers = [tuple(int(x) for x in ln[3:].split("]")[0].split(".")) for ln in acts]

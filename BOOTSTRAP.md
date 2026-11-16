@@ -96,6 +96,9 @@ re-running won't overwrite files it already created). "kept existing" files: mer
   payments, admin, migrations) to `never_auto_paths`. Leave `require_ci` out (a PR with no CI then waits for the
   owner exactly when merging deploys) unless the owner said otherwise. `max_phases_per_launch` only if the owner
   asked for a cap.
+- Python linters: `.taskmaster/ruff.toml` and `.claude/ruff.toml` keep the project's ruff rules off the harness
+  scripts. If the project runs another linter or formatter over the whole repo (flake8, black, pylint, mypy,
+  prettier), add `.taskmaster/` and `.claude/` to its excludes, or the project's CI fails on harness files.
 - `.claude/settings.json`: the deny rules block pushing to `main` and `master`. If the default branch has another
   name, add `Bash(git push *:<name>)`, `Bash(git push *:<name> *)`, `Bash(git push origin <name>)` and
   `Bash(git push origin <name> *)` to `deny`.
